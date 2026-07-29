@@ -1,0 +1,18 @@
+# C/C++ Build outputs
+*.o
+*.elf
+*.bin
+*.hex
+build/
+Debug/
+Release/
+
+# Node.js / Backend
+node_modules/
+.env
+
+# IDE configurations
+.vscode/
+.idea/
+*.uvoptx
+*.uvprojx
