@@ -57,6 +57,22 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define BUZZER_Pin GPIO_PIN_0
+#define BUZZER_GPIO_Port GPIOA
+#define MOTOR1_Pin GPIO_PIN_6
+#define MOTOR1_GPIO_Port GPIOA
+#define MOTOR2_Pin GPIO_PIN_7
+#define MOTOR2_GPIO_Port GPIOA
+#define RELAY2_Pin GPIO_PIN_0
+#define RELAY2_GPIO_Port GPIOB
+#define RELAY1_Pin GPIO_PIN_1
+#define RELAY1_GPIO_Port GPIOB
+#define LED_Pin GPIO_PIN_15
+#define LED_GPIO_Port GPIOB
+#define D_OUT_Pin GPIO_PIN_10
+#define D_OUT_GPIO_Port GPIOA
+#define DATA_OUT_Pin GPIO_PIN_15
+#define DATA_OUT_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
 
