@@ -181,12 +181,7 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-    /* USER CODE END WHILE */
-
-    /* USER CODE BEGIN 3 */
-  }
+  /* while loop deleted */
   /* USER CODE END 3 */
 }
 
@@ -395,7 +390,10 @@ void StartDefaultTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+  /* Vi dang cap quyen cho Scheduler nen khong de trong vong lap while duoc nua */
+	HAL_GPIO_TogglePin(GPIOB, LED_Pin);
+  /* 500ms = 0.5s */
+	osDelay(500);
   }
   /* USER CODE END 5 */
 }
