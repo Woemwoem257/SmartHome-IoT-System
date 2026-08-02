@@ -387,13 +387,33 @@ static void MX_GPIO_Init(void)
 void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
+
+  /* Khởi tạo trạng thái an toàn: Ghim mức HIGH để TẮT MOSFET trước khi vào vòng lặp */
+  HAL_GPIO_WritePin(GPIOA, MOTOR1_Pin, GPIO_PIN_SET);
+
   /* Infinite loop */
   for(;;)
   {
-  /* Vi dang cap quyen cho Scheduler nen khong de trong vong lap while duoc nua */
-	HAL_GPIO_TogglePin(GPIOB, LED_Pin);
-  /* 500ms = 0.5s */
-	osDelay(500);
+    /* 1. System Heartbeat */
+    HAL_GPIO_TogglePin(GPIOB, LED_Pin);
+
+    /*
+     * TRẠNG THÁI 1: BẬT ĐỘNG CƠ (ACTIVE-LOW)
+     * Data Flow: MCU xuất LOW (0V) -> Opto TẮT -> R21 kéo cực Gate lên ~16.1V -> MOSFET DẪN
+     */
+    HAL_GPIO_WritePin(GPIOA, MOTOR1_Pin, GPIO_PIN_RESET);
+
+    // Giữ trạng thái 4 giây để ổn định que đo VOM hoặc quan sát động cơ khởi động
+    osDelay(4000);
+
+    /*
+     * TRẠNG THÁI 2: TẮT ĐỘNG CƠ
+     * Data Flow: MCU xuất HIGH (3.3V) -> Opto BẬT -> Cực Gate bị kéo xuống Mass -> MOSFET NGẮT
+     */
+    HAL_GPIO_WritePin(GPIOA, MOTOR1_Pin, GPIO_PIN_SET);
+
+    // Giữ trạng thái 4 giây để đo đạc và chờ động cơ xả hết trớn (Inertia)
+    osDelay(4000);
   }
   /* USER CODE END 5 */
 }
