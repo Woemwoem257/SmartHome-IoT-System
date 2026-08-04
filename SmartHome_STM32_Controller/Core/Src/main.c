@@ -79,6 +79,11 @@ osTimerId_t Timer_HeartbeatHandle;
 const osTimerAttr_t Timer_Heartbeat_attributes = {
   .name = "Timer_Heartbeat"
 };
+/* Definitions for AlarmSemaphore */
+osSemaphoreId_t AlarmSemaphoreHandle;
+const osSemaphoreAttr_t AlarmSemaphore_attributes = {
+  .name = "AlarmSemaphore"
+};
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -146,6 +151,10 @@ int main(void)
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
+
+  /* Create the semaphores(s) */
+  /* creation of AlarmSemaphore */
+  AlarmSemaphoreHandle = osSemaphoreNew(1, 1, &AlarmSemaphore_attributes);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
@@ -372,7 +381,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : D_OUT_Pin */
   GPIO_InitStruct.Pin = D_OUT_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(D_OUT_GPIO_Port, &GPIO_InitStruct);
 
@@ -383,13 +392,31 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(DATA_OUT_GPIO_Port, &GPIO_InitStruct);
 
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
-
+/**
+  * @brief  EXTI line detection callbacks.
+  * @param  GPIO_Pin: Specifies the pins connected EXTI line
+  * @retval None
+  */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  // Kiểm tra xem có đúng là ngắt từ chân MQ-2 (PA10) không
+  if(GPIO_Pin == D_OUT_Pin)
+  {
+    // Bắn tín hiệu Semaphore đánh thức Task_Alarm
+    // Ưu điểm của CMSIS_V2: osSemaphoreRelease tự động xử lý an toàn trong môi trường ngắt
+    osSemaphoreRelease(AlarmSemaphoreHandle);
+  }
+}
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_StartDefaultTask */
@@ -474,18 +501,42 @@ void StartTask03(void *argument)
 void StartTask04(void *argument)
 {
   /* USER CODE BEGIN StartTask04 */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
+
+	// RÚT CẠN SEMAPHORE: Lấy Token dư thừa lúc khởi tạo (Không chờ)
+	  osSemaphoreAcquire(AlarmSemaphoreHandle, 0);
+	  /* Infinite loop */
+	for(;;)
+	  {
+	      // 1. NGỦ ĐÔNG VÔ TẬN: Task sẽ dừng ở dòng này, nhường 100% CPU cho tác vụ khác.
+	      // Nó chỉ chạy tiếp khi hàm ngắt ở trên gọi hàm Release()
+	      osSemaphoreAcquire(AlarmSemaphoreHandle, osWaitForever);
+
+	      // 2. KHI CÓ KHÓI (Đã vượt qua được Semaphore)
+	      // Do task có quyền Realtime, CPU sẽ lập tức chạy đoạn này, bỏ qua mọi task khác
+
+	      // Kích hoạt còi báo động (BUZZER_Pin)
+	      HAL_GPIO_WritePin(GPIOA, BUZZER_Pin, GPIO_PIN_SET);
+
+	      // Khóa khẩn cấp các tải AC (Giả sử Relay đang Active Low thì set lên HIGH để ngắt)
+	      HAL_GPIO_WritePin(GPIOB, RELAY1_Pin | RELAY2_Pin, GPIO_PIN_SET);
+
+	      // Khóa khẩn cấp tải DC (MOSFET thường Active High nên set LOW để ngắt)
+	      HAL_GPIO_WritePin(GPIOA, MOTOR1_Pin | MOTOR2_Pin, GPIO_PIN_RESET);
+
+	      // Vòng lặp khóa chết hệ thống: Bíp còi liên tục, không cho mạch làm việc gì khác
+	      // Cho đến khi người dùng ngắt nguồn để reset
+	      while(1) {
+	          HAL_GPIO_TogglePin(GPIOA, BUZZER_Pin);
+	          osDelay(3000); // Nhịp hú của còi
+	      }
+	  }
   /* USER CODE END StartTask04 */
 }
 
 /* Callback01 function */
 void Callback01(void *argument)
 {
-    /* 1. System Heartbeat */
+  /* USER CODE BEGIN Callback01 */
 	HAL_GPIO_TogglePin(GPIOB, LED_Pin);
   /* USER CODE END Callback01 */
 }
