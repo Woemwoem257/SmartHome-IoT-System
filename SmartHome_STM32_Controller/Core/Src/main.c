@@ -19,6 +19,10 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
+#include <stdint.h>
+#include <stdbool.h>
+#include <string.h>
+#include "cJSON.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -84,6 +88,14 @@ osSemaphoreId_t AlarmSemaphoreHandle;
 const osSemaphoreAttr_t AlarmSemaphore_attributes = {
   .name = "AlarmSemaphore"
 };
+
+// Khai báo Struct chứa Payload
+typedef struct {
+    uint16_t cmd_id;
+    char action[32];
+    uint32_t timeout_ms;
+} AppCommand_t;
+
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -417,8 +429,74 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     osSemaphoreRelease(AlarmSemaphoreHandle);
   }
 }
-/* USER CODE END 4 */
 
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
+{
+    if (huart->Instance == USART6)
+    {
+        // Gói tin từ ESP32 đã đến trọn vẹn.
+        // Biến 'Size' cho bạn biết chính xác ESP32 đã gửi bao nhiêu byte.
+
+        // Bắn Cờ hiệu (Thread Flag 0x01) để đánh thức Task03 dậy xử lý Buffer
+        osThreadFlagsSet(UART_Parse_TaskHandle, 0x01);
+    }
+}
+
+/**
+	       * @brief Parse JSON string from UART/MQTT into C Struct
+	       * @param json_str Pointer to raw string buffer
+	       * @param out_cmd Pointer to the struct to hold parsed data
+	       * @return bool True if successful, False if invalid JSON or missing fields
+	       */
+	      bool Parse_Command_JSON(const char* json_str, AppCommand_t* out_cmd) {
+	          // 1. Sanity Check
+	          if (json_str == NULL || out_cmd == NULL) {
+	              return false;
+	          }
+
+	          // 2. Phân tích chuỗi thành cJSON Object (Quá trình này có malloc)
+	          cJSON *root = cJSON_Parse(json_str);
+	          if (root == NULL) {
+	              // Parse thất bại (chuỗi không đúng chuẩn JSON)
+	              return false;
+	          }
+
+	          bool parse_status = true; // Cờ trạng thái
+
+	          // 3. Trích xuất từng Field (cJSON_GetObjectItem) và ép kiểu (Validation)
+
+	          // Xử lý field "cmd_id"
+	          cJSON *cmd_id_item = cJSON_GetObjectItem(root, "cmd_id");
+	          if (cJSON_IsNumber(cmd_id_item)) {
+	              out_cmd->cmd_id = (uint16_t)cmd_id_item->valueint;
+	          } else {
+	              parse_status = false;
+	          }
+
+	          // Xử lý field "action"
+	          cJSON *action_item = cJSON_GetObjectItem(root, "action");
+	          if (cJSON_IsString(action_item) && (action_item->valuestring != NULL)) {
+	              // Copy chuỗi một cách an toàn (tránh Buffer Overflow)
+	              strncpy(out_cmd->action, action_item->valuestring, sizeof(out_cmd->action) - 1);
+	              out_cmd->action[sizeof(out_cmd->action) - 1] = '\0'; // Đảm bảo null-terminated
+	          } else {
+	              parse_status = false;
+	          }
+
+	          // Xử lý field "timeout_ms"
+	          cJSON *timeout_item = cJSON_GetObjectItem(root, "timeout_ms");
+	          if (cJSON_IsNumber(timeout_item)) {
+	              out_cmd->timeout_ms = (uint32_t)timeout_item->valuedouble; // Dùng valuedouble cho số lớn
+	          } else {
+	              parse_status = false;
+	          }
+
+	          // 4. BẮT BUỘC: Giải phóng bộ nhớ đã cấp phát cho cJSON object để tránh Memory Leak
+	          cJSON_Delete(root);
+
+	          return parse_status;
+	      }
+/* USER CODE END 4 */
 /* USER CODE BEGIN Header_StartDefaultTask */
 /**
   * @brief  Function implementing the App_Main_Task thread.
@@ -434,23 +512,7 @@ void StartDefaultTask(void *argument)
   {
 
 
-    /*
-     * TRẠNG THÁI 1: BẬT ĐỘNG CƠ (ACTIVE-LOW)
-     * Data Flow: MCU xuất LOW (0V) -> Opto TẮT -> R21 kéo cực Gate lên ~16.1V -> MOSFET DẪN
-     */
-    HAL_GPIO_WritePin(GPIOB, RELAY1_Pin, GPIO_PIN_RESET);
 
-    // Giữ trạng thái 4 giây để ổn định que đo VOM hoặc quan sát động cơ khởi động
-    osDelay(3000);
-
-    /*
-     * TRẠNG THÁI 2: TẮT ĐỘNG CƠ
-     * Data Flow: MCU xuất HIGH (3.3V) -> Opto BẬT -> Cực Gate bị kéo xuống Mass -> MOSFET NGẮT
-     */
-    HAL_GPIO_WritePin(GPIOB, RELAY1_Pin, GPIO_PIN_SET);
-
-    // Giữ trạng thái 4 giây để đo đạc và chờ động cơ xả hết trớn (Inertia)
-    osDelay(3000);
   }
   /* USER CODE END 5 */
 }
@@ -465,10 +527,31 @@ void StartDefaultTask(void *argument)
 void StartTask02(void *argument)
 {
   /* USER CODE BEGIN StartTask02 */
+	  /* Khởi tạo trạng thái an toàn: Ghim mức HIGH để TẮT MOSFET trước khi vào vòng lặp */
+	  HAL_GPIO_WritePin(GPIOA, MOTOR1_Pin, GPIO_PIN_SET);
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+	  /*
+	       * TRẠNG THÁI 1: BẬT ĐỘNG CƠ (ACTIVE-LOW)
+	       * Data Flow: MCU xuất LOW (0V) -> Opto TẮT -> R21 kéo cực Gate lên ~16.1V -> MOSFET DẪN
+	       */
+	      HAL_GPIO_WritePin(GPIOB, RELAY1_Pin, GPIO_PIN_RESET);
+	      HAL_GPIO_WritePin(GPIOB, RELAY1_Pin, GPIO_PIN_SET);
+
+	      // Giữ trạng thái 4 giây để ổn định que đo VOM hoặc quan sát động cơ khởi động
+	      osDelay(3000);
+
+	      /*
+	       * TRẠNG THÁI 2: TẮT ĐỘNG CƠ
+	       * Data Flow: MCU xuất HIGH (3.3V) -> Opto BẬT -> Cực Gate bị kéo xuống Mass -> MOSFET NGẮT
+	       */
+	      HAL_GPIO_WritePin(GPIOB, RELAY1_Pin, GPIO_PIN_SET);
+	      HAL_GPIO_WritePin(GPIOB, RELAY1_Pin, GPIO_PIN_RESET);
+
+
+	      // Giữ trạng thái 4 giây để đo đạc và chờ động cơ xả hết trớn (Inertia)
+	      osDelay(3000);
   }
   /* USER CODE END StartTask02 */
 }
@@ -482,14 +565,42 @@ void StartTask02(void *argument)
 /* USER CODE END Header_StartTask03 */
 void StartTask03(void *argument)
 {
-  /* USER CODE BEGIN StartTask03 */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
-  /* USER CODE END StartTask03 */
-}
+	/* USER CODE BEGIN StartTask03 */
+	    uint8_t rx_buffer[256];
+	    AppCommand_t my_cmd; // Biến cấu trúc để hứng dữ liệu sau khi bóc tách
+
+	    // Dọn sạch rác trong RAM trước khi nhận
+	    memset(rx_buffer, 0, sizeof(rx_buffer));
+	    // Khởi động DMA lắng nghe
+	    HAL_UARTEx_ReceiveToIdle_DMA(&huart6, rx_buffer, sizeof(rx_buffer));
+
+	    /* Infinite loop */
+	    for(;;)
+	    {
+	        // 1. NGỦ ĐÔNG chờ cờ hiệu (Thread Flag) từ ngắt IDLE DMA
+	        osThreadFlagsWait(0x01, osFlagsWaitAny, osWaitForever);
+
+	        // 2. ÉP KIỂU VÀ PARSE JSON (Gọi hàm)
+	        // Lưu ý: Ép kiểu rx_buffer (uint8_t*) thành (char*) để cJSON hiểu
+	        if (Parse_Command_JSON((char*)rx_buffer, &my_cmd))
+	        {
+	            // Nếu code chạy vào đây -> Bóc tách JSON thành công!
+	            // Ví dụ: Kiểm tra nếu ESP32 gửi action là "bật_đèn"
+	            if (strcmp(my_cmd.action, "turn_on_relay") == 0) {
+	                // Tương lai: osMessageQueuePut(...) để đẩy lệnh sang Task02
+	            }
+	        }
+
+	        // 3. ECHO TEST: Gửi trả lại đúng đoạn JSON đó lên ESP32 để Debug
+	        // Dùng hàm strlen để tính đúng số byte có nghĩa, không gửi mảng thừa
+	        HAL_UART_Transmit_DMA(&huart6, rx_buffer, strlen((char*)rx_buffer));
+
+	        // 4. RESET BUFFER & LẮNG NGHE TIẾP
+	        memset(rx_buffer, 0, sizeof(rx_buffer));
+	        HAL_UARTEx_ReceiveToIdle_DMA(&huart6, rx_buffer, sizeof(rx_buffer));
+	    }
+	  /* USER CODE END StartTask03 */
+	}
 
 /* USER CODE BEGIN Header_StartTask04 */
 /**
