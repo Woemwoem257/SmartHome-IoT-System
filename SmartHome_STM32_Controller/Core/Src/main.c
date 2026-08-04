@@ -46,33 +46,38 @@ I2C_HandleTypeDef hi2c3;
 UART_HandleTypeDef huart6;
 DMA_HandleTypeDef hdma_usart6_rx;
 
-/* Definitions for App_Main_Task */
-osThreadId_t App_Main_TaskHandle;
-const osThreadAttr_t App_Main_Task_attributes = {
-  .name = "App_Main_Task",
+/* Definitions for Sensor_Task */
+osThreadId_t Sensor_TaskHandle;
+const osThreadAttr_t Sensor_Task_attributes = {
+  .name = "Sensor_Task",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
-/* Definitions for Task_Sensor */
-osThreadId_t Task_SensorHandle;
-const osThreadAttr_t Task_Sensor_attributes = {
-  .name = "Task_Sensor",
+/* Definitions for Actuator_Task */
+osThreadId_t Actuator_TaskHandle;
+const osThreadAttr_t Actuator_Task_attributes = {
+  .name = "Actuator_Task",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
-/* Definitions for Task_UART_Parse */
-osThreadId_t Task_UART_ParseHandle;
-const osThreadAttr_t Task_UART_Parse_attributes = {
-  .name = "Task_UART_Parse",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityHigh,
+/* Definitions for UART_Parse_Task */
+osThreadId_t UART_Parse_TaskHandle;
+const osThreadAttr_t UART_Parse_Task_attributes = {
+  .name = "UART_Parse_Task",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityAboveNormal,
 };
-/* Definitions for Task_Alarm */
-osThreadId_t Task_AlarmHandle;
-const osThreadAttr_t Task_Alarm_attributes = {
-  .name = "Task_Alarm",
+/* Definitions for Alarm_Task */
+osThreadId_t Alarm_TaskHandle;
+const osThreadAttr_t Alarm_Task_attributes = {
+  .name = "Alarm_Task",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityRealtime,
+};
+/* Definitions for Timer_Heartbeat */
+osTimerId_t Timer_HeartbeatHandle;
+const osTimerAttr_t Timer_Heartbeat_attributes = {
+  .name = "Timer_Heartbeat"
 };
 /* USER CODE BEGIN PV */
 
@@ -88,6 +93,7 @@ void StartDefaultTask(void *argument);
 void StartTask02(void *argument);
 void StartTask03(void *argument);
 void StartTask04(void *argument);
+void Callback01(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -145,8 +151,12 @@ int main(void)
   /* add semaphores, ... */
   /* USER CODE END RTOS_SEMAPHORES */
 
+  /* Create the timer(s) */
+  /* creation of Timer_Heartbeat */
+  Timer_HeartbeatHandle = osTimerNew(Callback01, osTimerPeriodic, NULL, &Timer_Heartbeat_attributes);
+
   /* USER CODE BEGIN RTOS_TIMERS */
-  /* start timers, add new ones, ... */
+  osTimerStart(Timer_HeartbeatHandle, 1000U);
   /* USER CODE END RTOS_TIMERS */
 
   /* USER CODE BEGIN RTOS_QUEUES */
@@ -154,17 +164,17 @@ int main(void)
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* creation of App_Main_Task */
-  App_Main_TaskHandle = osThreadNew(StartDefaultTask, NULL, &App_Main_Task_attributes);
+  /* creation of Sensor_Task */
+  Sensor_TaskHandle = osThreadNew(StartDefaultTask, NULL, &Sensor_Task_attributes);
 
-  /* creation of Task_Sensor */
-  Task_SensorHandle = osThreadNew(StartTask02, NULL, &Task_Sensor_attributes);
+  /* creation of Actuator_Task */
+  Actuator_TaskHandle = osThreadNew(StartTask02, NULL, &Actuator_Task_attributes);
 
-  /* creation of Task_UART_Parse */
-  Task_UART_ParseHandle = osThreadNew(StartTask03, NULL, &Task_UART_Parse_attributes);
+  /* creation of UART_Parse_Task */
+  UART_Parse_TaskHandle = osThreadNew(StartTask03, NULL, &UART_Parse_Task_attributes);
 
-  /* creation of Task_Alarm */
-  Task_AlarmHandle = osThreadNew(StartTask04, NULL, &Task_Alarm_attributes);
+  /* creation of Alarm_Task */
+  Alarm_TaskHandle = osThreadNew(StartTask04, NULL, &Alarm_Task_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -181,7 +191,12 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  /* while loop deleted */
+  while (1)
+  {
+    /* USER CODE END WHILE */
+
+    /* USER CODE BEGIN 3 */
+  }
   /* USER CODE END 3 */
 }
 
@@ -387,33 +402,28 @@ static void MX_GPIO_Init(void)
 void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
-
-  /* Khởi tạo trạng thái an toàn: Ghim mức HIGH để TẮT MOSFET trước khi vào vòng lặp */
-  HAL_GPIO_WritePin(GPIOA, MOTOR1_Pin, GPIO_PIN_SET);
-
   /* Infinite loop */
   for(;;)
   {
-    /* 1. System Heartbeat */
-    HAL_GPIO_TogglePin(GPIOB, LED_Pin);
+
 
     /*
      * TRẠNG THÁI 1: BẬT ĐỘNG CƠ (ACTIVE-LOW)
      * Data Flow: MCU xuất LOW (0V) -> Opto TẮT -> R21 kéo cực Gate lên ~16.1V -> MOSFET DẪN
      */
-    HAL_GPIO_WritePin(GPIOA, MOTOR1_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOB, RELAY1_Pin, GPIO_PIN_RESET);
 
     // Giữ trạng thái 4 giây để ổn định que đo VOM hoặc quan sát động cơ khởi động
-    osDelay(4000);
+    osDelay(3000);
 
     /*
      * TRẠNG THÁI 2: TẮT ĐỘNG CƠ
      * Data Flow: MCU xuất HIGH (3.3V) -> Opto BẬT -> Cực Gate bị kéo xuống Mass -> MOSFET NGẮT
      */
-    HAL_GPIO_WritePin(GPIOA, MOTOR1_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOB, RELAY1_Pin, GPIO_PIN_SET);
 
     // Giữ trạng thái 4 giây để đo đạc và chờ động cơ xả hết trớn (Inertia)
-    osDelay(4000);
+    osDelay(3000);
   }
   /* USER CODE END 5 */
 }
@@ -470,6 +480,14 @@ void StartTask04(void *argument)
     osDelay(1);
   }
   /* USER CODE END StartTask04 */
+}
+
+/* Callback01 function */
+void Callback01(void *argument)
+{
+    /* 1. System Heartbeat */
+	HAL_GPIO_TogglePin(GPIOB, LED_Pin);
+  /* USER CODE END Callback01 */
 }
 
 /**
