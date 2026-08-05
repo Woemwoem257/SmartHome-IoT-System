@@ -22,6 +22,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include "cJSON.h"
+#include "dht22.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -39,7 +40,9 @@ typedef struct {
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define INA219_ADDR  (0x40 << 1)
+#define REG_BUS_VOLTAGE 0x02
+#define REG_CURRENT     0x04
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -118,7 +121,35 @@ void Callback01(void *argument);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+// --- KHỞI TẠO DWT CHO HÀM DELAY MICRO-GIÂY ---
+#define DWT_CTRL    (*(volatile uint32_t *)0xE0001000)
+#define DWT_CYCCNT  (*(volatile uint32_t *)0xE0001004)
+#define DEMCR       (*(volatile uint32_t *)0xE000EDFC)
+#define DEMCR_TRCENA    0x01000000
 
+/**
+ * @brief Khởi tạo bộ đếm chu kỳ máy (Cycle Counter)
+ */
+void DWT_Init(void) {
+    DEMCR |= DEMCR_TRCENA; // Bật TRCENA
+    DWT_CYCCNT = 0;        // Reset bộ đếm
+    DWT_CTRL |= 1;         // Bật đếm chu kỳ (CYCCNTENA)
+}
+
+/**
+ * @brief Hàm tạo trễ chính xác mức micro-giây
+ * @param us Số micro-giây cần trễ
+ */
+void delay_us(uint32_t us) {
+    uint32_t start_tick = DWT_CYCCNT;
+    // SystemCoreClock lưu tần số CPU (ví dụ: 100MHz).
+    // Phép chia 1000000 giúp quy đổi tần số ra số chu kỳ trong 1 micro-giây.
+    uint32_t delay_ticks = us * (SystemCoreClock / 1000000);
+
+    while ((DWT_CYCCNT - start_tick) < delay_ticks) {
+        // Vòng lặp chờ bằng phần cứng, độ trễ chính xác đến từng chu kỳ (Clock Cycle)
+    }
+}
 /* USER CODE END 0 */
 
 /**
@@ -154,8 +185,16 @@ int main(void)
   MX_I2C3_Init();
   MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
+  /* Initialize all configured peripherals */
+    MX_GPIO_Init();
+    MX_DMA_Init();
+    MX_I2C3_Init();
+    MX_USART6_UART_Init();
+    /* USER CODE BEGIN 2 */
 
-  /* USER CODE END 2 */
+    DWT_Init(); // Kích hoạt bộ đếm thời gian thực DWT
+
+    /* USER CODE END 2 */
 
   /* Init scheduler */
   osKernelInitialize();
@@ -497,13 +536,55 @@ bool Parse_Command_JSON(const char* json_str, ControlCmd_t* out_cmd) {
 void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
-  /* Infinite loop */
-  for(;;)
-  {
+    uint8_t i2c_buf[2];
+    float bus_voltage_V = 0.0;
+    float current_mA = 0.0;
+    DHT22_Data_t my_dht_data;
 
+    DHT22_Init();
 
+    // --- KHỞI TẠO INA219 (BẮT BUỘC ĐỂ ĐỌC ĐƯỢC DÒNG ĐIỆN) ---
+    // Tính toán giá trị Calibration dựa trên R_Shunt = 0.1 Ohm và Max Current = 3.2A
+    // Theo công thức Datasheet, giá trị Calib thường là 4096 (0x1000)
+    uint8_t calib_data[2] = {0x10, 0x00};
+    HAL_I2C_Mem_Write(&hi2c3, INA219_ADDR, 0x05, 1, calib_data, 2, 100);
+    // ---------------------------------------------------------
 
-  }
+    /* Infinite loop */
+    for(;;)
+    {
+        // 1. ĐỌC ĐIỆN ÁP TẢI (Bus Voltage)
+        if(HAL_I2C_Mem_Read(&hi2c3, INA219_ADDR, REG_BUS_VOLTAGE, 1, i2c_buf, 2, 100) == HAL_OK)
+        {
+            int16_t raw_voltage = (i2c_buf[0] << 8) | i2c_buf[1];
+            bus_voltage_V = ((raw_voltage >> 3) * 4) / 1000.0f;
+        }
+
+        // 2. ĐỌC DÒNG ĐIỆN (Current)
+        if(HAL_I2C_Mem_Read(&hi2c3, INA219_ADDR, REG_CURRENT, 1, i2c_buf, 2, 100) == HAL_OK)
+        {
+            int16_t raw_current = (i2c_buf[0] << 8) | i2c_buf[1];
+            current_mA = (float)raw_current / 10.0f; // Divider phụ thuộc vào công thức Calib
+        }
+
+        // --- Xóa Cảnh Báo (Suppress Warnings) ---
+                (void)bus_voltage_V;
+                (void)current_mA;
+                // ----------------------------------------
+
+        // 3. ĐỌC DHT22 (Chờ xây dựng thư viện)
+        if (DHT22_Read_Data(&my_dht_data)) {
+                    // Lấy được dữ liệu an toàn, chuẩn bị đóng gói vào struct gửi đi
+                    // printf("Temp: %.1f, Hum: %.1f\n", my_dht_data.Temperature, my_dht_data.Humidity);
+                } else {
+                    // Xử lý lỗi (vd: gửi cảnh báo về Web Dashboard là mất kết nối cảm biến)
+                }
+
+        // 4. (Tương lai) Đóng gói thành chuỗi JSON và gửi DMA UART lên ESP32.
+
+        // Chu kỳ lấy mẫu: 2 giây theo đúng Checklist
+        osDelay(2000);
+    }
   /* USER CODE END 5 */
 }
 
