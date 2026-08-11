@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"name": "test_arduino_framework",
+			"path": "../../../../PlatformIO/test_arduino_framework"
+		},
+		{
+			"name": "ESP32_Gateway",
+			"path": ".."
+		}
+	],
+	"settings": {}
+}

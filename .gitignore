@@ -1,3 +1,21 @@
+# C/C++ Build outputs
+*.o
+*.elf
+*.bin
+*.hex
+build/
+Debug/
+Release/
+
+# Node.js / Python / Backend
+node_modules/
+.env
 venv/
 __pycache__/
 *.pyc
+
+# IDE configurations
+.vscode/
+.idea/
+*.uvoptx
+*.uvprojx
