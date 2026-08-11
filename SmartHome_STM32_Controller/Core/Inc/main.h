@@ -59,10 +59,6 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define BUZZER_Pin GPIO_PIN_0
 #define BUZZER_GPIO_Port GPIOA
-#define MOTOR1_Pin GPIO_PIN_6
-#define MOTOR1_GPIO_Port GPIOA
-#define MOTOR2_Pin GPIO_PIN_7
-#define MOTOR2_GPIO_Port GPIOA
 #define RELAY2_Pin GPIO_PIN_0
 #define RELAY2_GPIO_Port GPIOB
 #define RELAY1_Pin GPIO_PIN_1

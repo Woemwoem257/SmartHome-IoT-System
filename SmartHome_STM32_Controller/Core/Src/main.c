@@ -19,30 +19,28 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
+
+
+/* Private includes ----------------------------------------------------------*/
+/* USER CODE BEGIN Includes */
 #include <stdbool.h>
 #include <string.h>
 #include "cJSON.h"
 #include "dht22.h"
-
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
-
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 // Định nghĩa cấu trúc bản tin điều khiển
 typedef struct {
-    uint8_t device_id;  // 1: Relay 1 | 2: Relay 2 | 3: MOSFET 1 | 4: MOSFET 2
-    uint8_t state;      // 0: TẮT | 1: BẬT (Hoặc giá trị PWM từ 0-100 cho MOSFET)
+    uint8_t device_id;  // 1: Relay 1 | 2: Relay 2 |
+    uint8_t state;      // 0: TẮT | 1: BẬT
 } ControlCmd_t;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define INA219_ADDR  (0x40 << 1)
-#define REG_BUS_VOLTAGE 0x02
-#define REG_CURRENT     0x04
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -51,8 +49,6 @@ typedef struct {
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-I2C_HandleTypeDef hi2c3;
-
 UART_HandleTypeDef huart6;
 DMA_HandleTypeDef hdma_usart6_rx;
 
@@ -107,7 +103,6 @@ const osSemaphoreAttr_t AlarmSemaphore_attributes = {
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
-static void MX_I2C3_Init(void);
 static void MX_USART6_UART_Init(void);
 void StartDefaultTask(void *argument);
 void StartTask02(void *argument);
@@ -182,19 +177,17 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
-  MX_I2C3_Init();
   MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
   /* Initialize all configured peripherals */
     MX_GPIO_Init();
     MX_DMA_Init();
-    MX_I2C3_Init();
     MX_USART6_UART_Init();
     /* USER CODE BEGIN 2 */
 
     DWT_Init(); // Kích hoạt bộ đếm thời gian thực DWT
 
-    /* USER CODE END 2 */
+  /* USER CODE END 2 */
 
   /* Init scheduler */
   osKernelInitialize();
@@ -221,8 +214,7 @@ int main(void)
 
   /* Create the queue(s) */
   /* creation of ActuatorQueue */
-  ActuatorQueueHandle = osMessageQueueNew (10, sizeof(ControlCmd_t), &ActuatorQueue_attributes);
-
+    ActuatorQueueHandle = osMessageQueueNew(10, sizeof(ControlCmd_t), &ActuatorQueue_attributes);
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
@@ -311,40 +303,6 @@ void SystemClock_Config(void)
 }
 
 /**
-  * @brief I2C3 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_I2C3_Init(void)
-{
-
-  /* USER CODE BEGIN I2C3_Init 0 */
-
-  /* USER CODE END I2C3_Init 0 */
-
-  /* USER CODE BEGIN I2C3_Init 1 */
-
-  /* USER CODE END I2C3_Init 1 */
-  hi2c3.Instance = I2C3;
-  hi2c3.Init.ClockSpeed = 100000;
-  hi2c3.Init.DutyCycle = I2C_DUTYCYCLE_2;
-  hi2c3.Init.OwnAddress1 = 0;
-  hi2c3.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-  hi2c3.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-  hi2c3.Init.OwnAddress2 = 0;
-  hi2c3.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-  hi2c3.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-  if (HAL_I2C_Init(&hi2c3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN I2C3_Init 2 */
-
-  /* USER CODE END I2C3_Init 2 */
-
-}
-
-/**
   * @brief USART6 Initialization Function
   * @param None
   * @retval None
@@ -412,23 +370,31 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOC_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, BUZZER_Pin|MOTOR1_Pin|MOTOR2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, RELAY2_Pin|RELAY1_Pin|LED_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, RELAY2_Pin|RELAY1_Pin, GPIO_PIN_SET); // Tắt tài ngay từ lúc boot vì bị dòng rò.
+  HAL_GPIO_WritePin(GPIOB, LED_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(DATA_OUT_GPIO_Port, DATA_OUT_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pins : BUZZER_Pin MOTOR1_Pin MOTOR2_Pin */
-  GPIO_InitStruct.Pin = BUZZER_Pin|MOTOR1_Pin|MOTOR2_Pin;
+  /*Configure GPIO pin : BUZZER_Pin */
+  GPIO_InitStruct.Pin = BUZZER_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  HAL_GPIO_Init(BUZZER_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : RELAY2_Pin RELAY1_Pin LED_Pin */
-  GPIO_InitStruct.Pin = RELAY2_Pin|RELAY1_Pin|LED_Pin;
+  /*Cấu hình Relay dùng Open-Drain (OD) để chống rò dòng 5V */
+  GPIO_InitStruct.Pin = RELAY2_Pin|RELAY1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pins :  LED_Pin */
+  GPIO_InitStruct.Pin = LED_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -536,42 +502,13 @@ bool Parse_Command_JSON(const char* json_str, ControlCmd_t* out_cmd) {
 void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
-    uint8_t i2c_buf[2];
-    float bus_voltage_V = 0.0;
-    float current_mA = 0.0;
     DHT22_Data_t my_dht_data;
 
     DHT22_Init();
 
-    // --- KHỞI TẠO INA219 (BẮT BUỘC ĐỂ ĐỌC ĐƯỢC DÒNG ĐIỆN) ---
-    // Tính toán giá trị Calibration dựa trên R_Shunt = 0.1 Ohm và Max Current = 3.2A
-    // Theo công thức Datasheet, giá trị Calib thường là 4096 (0x1000)
-    uint8_t calib_data[2] = {0x10, 0x00};
-    HAL_I2C_Mem_Write(&hi2c3, INA219_ADDR, 0x05, 1, calib_data, 2, 100);
-    // ---------------------------------------------------------
-
     /* Infinite loop */
     for(;;)
     {
-        // 1. ĐỌC ĐIỆN ÁP TẢI (Bus Voltage)
-        if(HAL_I2C_Mem_Read(&hi2c3, INA219_ADDR, REG_BUS_VOLTAGE, 1, i2c_buf, 2, 100) == HAL_OK)
-        {
-            int16_t raw_voltage = (i2c_buf[0] << 8) | i2c_buf[1];
-            bus_voltage_V = ((raw_voltage >> 3) * 4) / 1000.0f;
-        }
-
-        // 2. ĐỌC DÒNG ĐIỆN (Current)
-        if(HAL_I2C_Mem_Read(&hi2c3, INA219_ADDR, REG_CURRENT, 1, i2c_buf, 2, 100) == HAL_OK)
-        {
-            int16_t raw_current = (i2c_buf[0] << 8) | i2c_buf[1];
-            current_mA = (float)raw_current / 10.0f; // Divider phụ thuộc vào công thức Calib
-        }
-
-        // --- Xóa Cảnh Báo (Suppress Warnings) ---
-                (void)bus_voltage_V;
-                (void)current_mA;
-                // ----------------------------------------
-
         // 3. ĐỌC DHT22 (Chờ xây dựng thư viện)
         if (DHT22_Read_Data(&my_dht_data)) {
                     // Lấy được dữ liệu an toàn, chuẩn bị đóng gói vào struct gửi đi
@@ -597,10 +534,9 @@ void StartDefaultTask(void *argument)
 /* USER CODE END Header_StartTask02 */
 void StartTask02(void *argument)
 {
-	  /* USER CODE BEGIN StartTask02 */
+  /* USER CODE BEGIN StartTask02 */
 	  // 1. Trạng thái an toàn ban đầu: Tắt toàn bộ tải
 	  HAL_GPIO_WritePin(GPIOB, RELAY1_Pin | RELAY2_Pin, GPIO_PIN_SET); // Active Low
-	  HAL_GPIO_WritePin(GPIOA, MOTOR1_Pin | MOTOR2_Pin, GPIO_PIN_RESET); // Active High
 
 	  ControlCmd_t rx_cmd; // Biến cục bộ để hứng dữ liệu từ Queue
 
@@ -623,22 +559,10 @@ void StartTask02(void *argument)
 	                  if (rx_cmd.state == 1) HAL_GPIO_WritePin(GPIOB, RELAY2_Pin, GPIO_PIN_RESET);
 	                  else HAL_GPIO_WritePin(GPIOB, RELAY2_Pin, GPIO_PIN_SET);
 	                  break;
-
-	              case 3: // Điều khiển MOSFET 1 (DC)
-	                  // Sau này bạn sẽ thay GPIO_Write bằng hàm xuất PWM: __HAL_TIM_SET_COMPARE(...)
-	                  if (rx_cmd.state > 0) HAL_GPIO_WritePin(GPIOA, MOTOR1_Pin, GPIO_PIN_SET);
-	                  else HAL_GPIO_WritePin(GPIOA, MOTOR1_Pin, GPIO_PIN_RESET);
-	                  break;
-
-	              case 4: // Điều khiển MOSFET 2 (DC)
-					  // Sau này bạn sẽ thay GPIO_Write bằng hàm xuất PWM: __HAL_TIM_SET_COMPARE(...)
-					  if (rx_cmd.state > 0) HAL_GPIO_WritePin(GPIOA, MOTOR2_Pin, GPIO_PIN_SET);
-					  else HAL_GPIO_WritePin(GPIOA, MOTOR2_Pin, GPIO_PIN_RESET);
-					  break;
 	          }
 	      }
 	  }
-	  /* USER CODE END StartTask02 */
+  /* USER CODE END StartTask02 */
 }
 
 /* USER CODE BEGIN Header_StartTask03 */
@@ -650,7 +574,7 @@ void StartTask02(void *argument)
 /* USER CODE END Header_StartTask03 */
 void StartTask03(void *argument)
 {
-    /* USER CODE BEGIN StartTask03 */
+  /* USER CODE BEGIN StartTask03 */
     uint8_t rx_buffer[256];
     uint8_t process_buffer[256]; // Thêm Local Buffer để xử lý an toàn
     ControlCmd_t tx_cmd;
@@ -684,7 +608,7 @@ void StartTask03(void *argument)
         // 5. Gửi Debug phản hồi (Sử dụng hàm Blocking để đảm bảo an toàn vùng nhớ)
         HAL_UART_Transmit(&huart6, process_buffer, strlen((char*)process_buffer), 100);
     }
-    /* USER CODE END StartTask03 */
+  /* USER CODE END StartTask03 */
 }
 
 /* USER CODE BEGIN Header_StartTask04 */
@@ -715,9 +639,6 @@ void StartTask04(void *argument)
 
 	      // Khóa khẩn cấp các tải AC (Giả sử Relay đang Active Low thì set lên HIGH để ngắt)
 	      HAL_GPIO_WritePin(GPIOB, RELAY1_Pin | RELAY2_Pin, GPIO_PIN_SET);
-
-	      // Khóa khẩn cấp tải DC (MOSFET thường Active High nên set LOW để ngắt)
-	      HAL_GPIO_WritePin(GPIOA, MOTOR1_Pin | MOTOR2_Pin, GPIO_PIN_RESET);
 
 	      // Vòng lặp khóa chết hệ thống: Bíp còi liên tục, không cho mạch làm việc gì khác
 	      // Cho đến khi người dùng ngắt nguồn để reset
