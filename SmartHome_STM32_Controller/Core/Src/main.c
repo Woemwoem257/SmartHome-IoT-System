@@ -457,38 +457,36 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
  * @param out_cmd Pointer to the struct to hold parsed data
  * @return bool True if successful, False if invalid JSON
  */
-bool Parse_Command_JSON(const char* json_str, ControlCmd_t* out_cmd) {
-    if (json_str == NULL || out_cmd == NULL) {
-        return false;
-    }
+bool Parse_And_Queue_JSON(const char* json_str) {
+    if (json_str == NULL) return false;
 
     cJSON *root = cJSON_Parse(json_str);
-    if (root == NULL) {
-        return false;
+    if (root == NULL) return false;
+
+    // 1. Kiểm tra và trích xuất trạng thái Relay 1
+    cJSON *relay1_item = cJSON_GetObjectItem(root, "relay1");
+    if (cJSON_IsNumber(relay1_item)) {
+        ControlCmd_t cmd1;
+        cmd1.device_id = 1;
+        cmd1.state = (uint8_t)relay1_item->valueint;
+        // Đẩy vào Queue không chờ (timeout = 0)
+        osMessageQueuePut(ActuatorQueueHandle, &cmd1, 0, 0);
     }
 
-    bool parse_status = true;
-
-    // 1. Trích xuất "device_id" (1, 2, 3, 4)
-    cJSON *dev_id_item = cJSON_GetObjectItem(root, "device_id");
-    if (cJSON_IsNumber(dev_id_item)) {
-        out_cmd->device_id = (uint8_t)dev_id_item->valueint;
-    } else {
-        parse_status = false;
-    }
-
-    // 2. Trích xuất "state" (0 hoặc 1)
-    cJSON *state_item = cJSON_GetObjectItem(root, "state");
-    if (cJSON_IsNumber(state_item)) {
-        out_cmd->state = (uint8_t)state_item->valueint;
-    } else {
-        parse_status = false;
-    }
+    // 2. Kiểm tra và trích xuất trạng thái Relay 2
+        cJSON *relay2_item = cJSON_GetObjectItem(root, "relay2");
+        if (cJSON_IsNumber(relay2_item)) {
+            ControlCmd_t cmd2;
+            cmd2.device_id = 2;
+            cmd2.state = (uint8_t)relay2_item->valueint;
+            // Đẩy vào Queue không chờ (timeout = 0)
+            osMessageQueuePut(ActuatorQueueHandle, &cmd2, 0, 0);
+        }
 
     // Giải phóng bộ nhớ Heap
     cJSON_Delete(root);
 
-    return parse_status;
+    return true;
 }
 /* USER CODE END 4 */
 
@@ -577,7 +575,6 @@ void StartTask03(void *argument)
   /* USER CODE BEGIN StartTask03 */
     uint8_t rx_buffer[256];
     uint8_t process_buffer[256]; // Thêm Local Buffer để xử lý an toàn
-    ControlCmd_t tx_cmd;
 
     memset(rx_buffer, 0, sizeof(rx_buffer));
 
@@ -600,10 +597,7 @@ void StartTask03(void *argument)
         HAL_UARTEx_ReceiveToIdle_DMA(&huart6, rx_buffer, sizeof(rx_buffer));
 
         // 4. Phân tích trên process_buffer (an toàn tuyệt đối)
-        if (Parse_Command_JSON((char*)process_buffer, &tx_cmd))
-        {
-            osMessageQueuePut(ActuatorQueueHandle, &tx_cmd, 0, 0);
-        }
+        Parse_And_Queue_JSON((char*)process_buffer);
 
         // 5. Gửi Debug phản hồi (Sử dụng hàm Blocking để đảm bảo an toàn vùng nhớ)
         HAL_UART_Transmit(&huart6, process_buffer, strlen((char*)process_buffer), 100);
