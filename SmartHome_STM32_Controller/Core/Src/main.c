@@ -373,7 +373,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, RELAY2_Pin|RELAY1_Pin, GPIO_PIN_SET); // Tắt tài ngay từ lúc boot vì bị dòng rò.
+  HAL_GPIO_WritePin(GPIOB, RELAY2_Pin|RELAY1_Pin, GPIO_PIN_RESET); // Tắt tài ngay từ lúc boot vì bị dòng rò.
   HAL_GPIO_WritePin(GPIOB, LED_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
@@ -388,7 +388,7 @@ static void MX_GPIO_Init(void)
 
   /*Cấu hình Relay dùng Open-Drain (OD) để chống rò dòng 5V */
   GPIO_InitStruct.Pin = RELAY2_Pin|RELAY1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
@@ -534,7 +534,7 @@ void StartTask02(void *argument)
 {
   /* USER CODE BEGIN StartTask02 */
 	  // 1. Trạng thái an toàn ban đầu: Tắt toàn bộ tải
-	  HAL_GPIO_WritePin(GPIOB, RELAY1_Pin | RELAY2_Pin, GPIO_PIN_SET); // Active Low
+	  HAL_GPIO_WritePin(GPIOB, RELAY1_Pin | RELAY2_Pin, GPIO_PIN_RESET); // Active Low
 
 	  ControlCmd_t rx_cmd; // Biến cục bộ để hứng dữ liệu từ Queue
 
@@ -548,14 +548,14 @@ void StartTask02(void *argument)
 	          switch (rx_cmd.device_id)
 	          {
 	              case 1: // Điều khiển Relay 1 (AC)
-	                  // Vì mạch Opto của bạn là Active Low: state=1 -> Kéo LOW để bật
-	                  if (rx_cmd.state == 1) HAL_GPIO_WritePin(GPIOB, RELAY1_Pin, GPIO_PIN_RESET);
-	                  else HAL_GPIO_WritePin(GPIOB, RELAY1_Pin, GPIO_PIN_SET);
+	                  // Mạch NPN Active High: state=1 => Kéo HIGH để bật
+	                  if (rx_cmd.state == 1) HAL_GPIO_WritePin(GPIOB, RELAY1_Pin, GPIO_PIN_SET);
+	                  else HAL_GPIO_WritePin(GPIOB, RELAY1_Pin, GPIO_PIN_RESET);
 	                  break;
 
 	              case 2: // Điều khiển Relay 2 (AC)
-	                  if (rx_cmd.state == 1) HAL_GPIO_WritePin(GPIOB, RELAY2_Pin, GPIO_PIN_RESET);
-	                  else HAL_GPIO_WritePin(GPIOB, RELAY2_Pin, GPIO_PIN_SET);
+	                  if (rx_cmd.state == 1) HAL_GPIO_WritePin(GPIOB, RELAY2_Pin, GPIO_PIN_SET);
+	                  else HAL_GPIO_WritePin(GPIOB, RELAY2_Pin, GPIO_PIN_RESET);
 	                  break;
 	          }
 	      }
