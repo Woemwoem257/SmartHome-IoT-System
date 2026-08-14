@@ -1,61 +1,22 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <freertos/queue.h>
 #include <esp_log.h>
 #include "wifi_manager.h"
+#include "uart_bridge.h"
 
-namespace 
-{ 
-	QueueHandle_t m_number_queue{xQueueCreate(5, sizeof(int))}; 
-	const constexpr int MAX_COUNT{10}; 
-	const constexpr char *TAG{"app"}; 
-	void producer(void *p); 
-	void consumer(void *p); 
-} // end of namespace
+const char *TAG = "app_main";
 
 extern "C" void app_main() 
 { 
-    ESP_LOGI(TAG, "application started"); 
+    ESP_LOGI(TAG, "Middleware Gateway Started"); 
 
-    //2. Kích hoạt kết nối Wi-Fi ngay khi Kernel khởi động
+    // 1. Kích hoạt kết nối Wi-Fi 
     WiFiManager::init();
-    ESP_LOGI(TAG, "WiFi Manager Initialized");
 
-    //3. Khởi tạo các Task xử lý luồng dữ liệu (Produce/Consumer)
-    xTaskCreate(producer, "producer", 4096, nullptr, 5, nullptr);
-    xTaskCreatePinnedToCore(consumer, "consumer-0", 4096, (void *)0, 5, nullptr, 0); 
-    xTaskCreatePinnedToCore(consumer, "consumer-1", 4096, (void *)1, 5, nullptr, 1);
+    // 2. Kích hoạt cầu nối UART (Tự động sinh ra rx_task chạy ngầm)
+    UartBridge::init();
 
-    // 4. In thống kê các Task đang chạy
-    char buffer[256]{0};
-    vTaskList(buffer);
-    ESP_LOGI(TAG, "\n%s", buffer);
-} // end of app_main
-
-namespace { 
-	void producer(void *p) 
-	{ 
-	int cnt{0}; 
-	vTaskDelay(pdMS_TO_TICKS(500));
-
-    while (++cnt <= MAX_COUNT)
-        {
-            xQueueSendToBack(m_number_queue, &cnt, portMAX_DELAY);
-            ESP_LOGI(TAG, "p:%d", cnt);
-        }
-
-        vTaskDelete(nullptr);
- } // end of pr
-
-    void consumer(void *p)
-    {
-        int num;
-
-        while (true)
-        {
-            xQueueReceive(m_number_queue, &num, portMAX_DELAY);
-            ESP_LOGI(TAG, "c%d:%d", (int)p, num);
-            vTaskDelay(2);
-        }
-    } // end of consumer
-} // end of namespace
+    // (Test) Giả lập gửi một lệnh JSON xuống STM32 sau 5 giây
+    vTaskDelay(5000 / portTICK_PERIOD_MS);
+    UartBridge::send_command("{\"relay1\": 1, \"relay2\": 0}\r\n");
+}
