@@ -2,6 +2,7 @@
 #include <freertos/task.h>
 #include <freertos/queue.h>
 #include <esp_log.h>
+#include "wifi_manager.h"
 
 namespace 
 { 
@@ -15,11 +16,17 @@ namespace
 extern "C" void app_main() 
 { 
     ESP_LOGI(TAG, "application started"); 
-    xTaskCreate(producer, "producer", 4096, nullptr, 5, nullptr);
 
+    //2. Kích hoạt kết nối Wi-Fi ngay khi Kernel khởi động
+    WiFiManager::init();
+    ESP_LOGI(TAG, "WiFi Manager Initialized");
+
+    //3. Khởi tạo các Task xử lý luồng dữ liệu (Produce/Consumer)
+    xTaskCreate(producer, "producer", 4096, nullptr, 5, nullptr);
     xTaskCreatePinnedToCore(consumer, "consumer-0", 4096, (void *)0, 5, nullptr, 0); 
     xTaskCreatePinnedToCore(consumer, "consumer-1", 4096, (void *)1, 5, nullptr, 1);
 
+    // 4. In thống kê các Task đang chạy
     char buffer[256]{0};
     vTaskList(buffer);
     ESP_LOGI(TAG, "\n%s", buffer);
@@ -52,5 +59,3 @@ namespace {
         }
     } // end of consumer
 } // end of namespace
-
-
