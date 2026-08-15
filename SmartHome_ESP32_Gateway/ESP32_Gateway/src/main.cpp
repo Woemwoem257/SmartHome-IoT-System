@@ -3,6 +3,7 @@
 #include <esp_log.h>
 #include "wifi_manager.h"
 #include "uart_bridge.h"
+#include "aws_mqtt.h"
 
 const char *TAG = "app_main";
 
@@ -15,6 +16,9 @@ extern "C" void app_main()
 
     // 2. Kích hoạt cầu nối UART (Tự động sinh ra rx_task chạy ngầm)
     UartBridge::init();
+
+    // 3. Kích hoạt mqtt 
+    AwsMqtt::init();
 
     // (Test) Giả lập gửi một lệnh JSON xuống STM32 sau 5 giây
     vTaskDelay(5000 / portTICK_PERIOD_MS);
