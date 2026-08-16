@@ -45,6 +45,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 void AwsMqtt::init() {
     esp_mqtt_client_config_t mqtt_cfg = {};
     
+    // Khai báo định danh thiết bị 
+    mqtt_cfg.credentials.client_id = "Django_Server_Client";
     // Cấu hình mạng & Broker
     mqtt_cfg.broker.address.uri = "mqtts://a2b1ak1ocftwcb-ats.iot.ap-southeast-2.amazonaws.com:8883"; // Port 8883 cho mTLS
     

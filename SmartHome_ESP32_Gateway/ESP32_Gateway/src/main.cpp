@@ -4,6 +4,7 @@
 #include "wifi_manager.h"
 #include "uart_bridge.h"
 #include "aws_mqtt.h"
+#include <esp_sntp.h>
 
 const char *TAG = "app_main";
 
@@ -17,7 +18,31 @@ extern "C" void app_main()
     // 2. Kích hoạt cầu nối UART (Tự động sinh ra rx_task chạy ngầm)
     UartBridge::init();
 
-    // 3. Kích hoạt mqtt 
+    // 3. Khối Code đồng bộ thời gian
+    ESP_LOGI(TAG, "Dang dong bo thoi gian tu NTP Server...");
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_init();
+
+    time_t now;
+    struct tm timeinfo;
+    time(&now);
+    localtime_r(&now, &timeinfo);
+    
+    // Khóa chết luồng này cho đến khi NTP cập nhật năm > 2020 (Năm 1970 + 50)
+    while (timeinfo.tm_year < (2020 - 1900)) {
+        ESP_LOGW(TAG, "Thoi gian hien tai la nam 1970. Dang cho IP va NTP Sync...");
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
+        time(&now);
+        localtime_r(&now, &timeinfo);
+    }
+
+    // In ra thời gian thực để xác nhận
+    char strftime_buf[64];
+    strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
+    ESP_LOGI(TAG, "THOI GIAN DA DONG BO: %s", strftime_buf);
+    
+    // 4. Kích hoạt mqtt 
     AwsMqtt::init();
 
     // (Test) Giả lập gửi một lệnh JSON xuống STM32 sau 5 giây
