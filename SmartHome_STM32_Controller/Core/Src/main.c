@@ -27,6 +27,8 @@
 #include <string.h>
 #include "cJSON.h"
 #include "dht22.h"
+#include <stdlib.h>
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -122,6 +124,9 @@ void Callback01(void *argument);
 #define DEMCR       (*(volatile uint32_t *)0xE000EDFC)
 #define DEMCR_TRCENA    0x01000000
 
+// Biến tĩnh lưu trữ số chu kỳ máy trên mỗi micro-giây
+static uint32_t dwt_us_ticks = 0;
+
 /**
  * @brief Khởi tạo bộ đếm chu kỳ máy (Cycle Counter)
  */
@@ -129,6 +134,9 @@ void DWT_Init(void) {
     DEMCR |= DEMCR_TRCENA; // Bật TRCENA
     DWT_CYCCNT = 0;        // Reset bộ đếm
     DWT_CTRL |= 1;         // Bật đếm chu kỳ (CYCCNTENA)
+
+// CACHE TẦN SỐ: Tính toán số tick cho 1us đúng một lần duy nhất
+dwt_us_ticks = HAL_RCC_GetHCLKFreq() / 1000000;
 }
 
 /**
@@ -137,9 +145,9 @@ void DWT_Init(void) {
  */
 void delay_us(uint32_t us) {
     uint32_t start_tick = DWT_CYCCNT;
-    // SystemCoreClock lưu tần số CPU (ví dụ: 100MHz).
-    // Phép chia 1000000 giúp quy đổi tần số ra số chu kỳ trong 1 micro-giây.
-    uint32_t delay_ticks = us * (SystemCoreClock / 1000000);
+
+    // Sử dụng biến đã cache, chỉ tốn 1 chu kỳ máy để thực thi phép nhân
+    uint32_t delay_ticks = us * dwt_us_ticks;
 
     while ((DWT_CYCCNT - start_tick) < delay_ticks) {
         // Vòng lặp chờ bằng phần cứng, độ trễ chính xác đến từng chu kỳ (Clock Cycle)
@@ -452,42 +460,55 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 }
 
 /**
- * @brief Parse JSON string from ESP32 into ControlCmd_t Struct
- * @param json_str Pointer to raw string buffer
- * @param out_cmd Pointer to the struct to hold parsed data
- * @return bool True if successful, False if invalid JSON
+ * @brief Parse JSON tĩnh không dùng cấp phát động (Zero-Allocation)
+ * @param json_str Con trỏ trỏ tới buffer chứa chuỗi JSON
+ * @return bool True nếu bóc tách thành công ít nhất 1 lệnh
  */
 bool Parse_And_Queue_JSON(const char* json_str) {
     if (json_str == NULL) return false;
 
-    cJSON *root = cJSON_Parse(json_str);
-    if (root == NULL) return false;
+    bool parsed_any = false;
 
-    // 1. Kiểm tra và trích xuất trạng thái Relay 1
-    cJSON *relay1_item = cJSON_GetObjectItem(root, "relay1");
-    if (cJSON_IsNumber(relay1_item)) {
-        ControlCmd_t cmd1;
-        cmd1.device_id = 1;
-        cmd1.state = (uint8_t)relay1_item->valueint;
-        // Đẩy vào Queue không chờ (timeout = 0)
-        osMessageQueuePut(ActuatorQueueHandle, &cmd1, 0, 0);
+    // --- XỬ LÝ RELAY 1 ---
+    // 1. Tìm vị trí xuất hiện của Key "relay1"
+    const char *p1 = strstr(json_str, "\"relay1\"");
+    if (p1 != NULL) {
+        // 2. Tìm vị trí dấu hai chấm ':' ngay sau Key
+        p1 = strchr(p1, ':');
+        if (p1 != NULL) {
+            // 3. Ép kiểu phần tử ngay sau dấu ':' thành số nguyên
+            int state1 = atoi(p1 + 1);
+
+            // 4. Kiểm tra biên bảo mật (Sanity Check) và đẩy vào Queue
+            if (state1 == 0 || state1 == 1) {
+                ControlCmd_t cmd1;
+                cmd1.device_id = 1;
+                cmd1.state = (uint8_t)state1;
+                osMessageQueuePut(ActuatorQueueHandle, &cmd1, 0, 0); //
+                parsed_any = true;
+            }
+        }
     }
 
-    // 2. Kiểm tra và trích xuất trạng thái Relay 2
-        cJSON *relay2_item = cJSON_GetObjectItem(root, "relay2");
-        if (cJSON_IsNumber(relay2_item)) {
-            ControlCmd_t cmd2;
-            cmd2.device_id = 2;
-            cmd2.state = (uint8_t)relay2_item->valueint;
-            // Đẩy vào Queue không chờ (timeout = 0)
-            osMessageQueuePut(ActuatorQueueHandle, &cmd2, 0, 0);
+    // --- XỬ LÝ RELAY 2 ---
+    const char *p2 = strstr(json_str, "\"relay2\"");
+    if (p2 != NULL) {
+        p2 = strchr(p2, ':');
+        if (p2 != NULL) {
+            int state2 = atoi(p2 + 1);
+            if (state2 == 0 || state2 == 1) {
+                ControlCmd_t cmd2;
+                cmd2.device_id = 2;
+                cmd2.state = (uint8_t)state2;
+                osMessageQueuePut(ActuatorQueueHandle, &cmd2, 0, 0); //[cite: 3]
+                parsed_any = true;
+            }
         }
+    }
 
-    // Giải phóng bộ nhớ Heap
-    cJSON_Delete(root);
-
-    return true;
+    return parsed_any;
 }
+
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_StartDefaultTask */
@@ -501,24 +522,34 @@ void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
     DHT22_Data_t my_dht_data;
+    char tx_buffer[128]; // Bộ đệm tĩnh chứa chuỗi JSON đẩy lên ESP32
 
+    // Khởi tạo cảm biến
     DHT22_Init();
 
     /* Infinite loop */
     for(;;)
     {
-        // 3. ĐỌC DHT22 (Chờ xây dựng thư viện)
+    	// 1. ĐỌC DỮ LIỆU TỪ DHT22
         if (DHT22_Read_Data(&my_dht_data)) {
-                    // Lấy được dữ liệu an toàn, chuẩn bị đóng gói vào struct gửi đi
-                    // printf("Temp: %.1f, Hum: %.1f\n", my_dht_data.Temperature, my_dht_data.Humidity);
-                } else {
-                    // Xử lý lỗi (vd: gửi cảnh báo về Web Dashboard là mất kết nối cảm biến)
-                }
+            // 2. ĐÓNG GÓI JSON (Zero-Allocation)
+            // Cấu trúc dự kiến: {"temp": 28.5, "hum": 60.2}
+            // Sử dụng snprintf để ngăn chặn triệt để lỗi Buffer Overflow
+            snprintf(tx_buffer, sizeof(tx_buffer), "{\"temp\": %.1f, \"hum\": %.1f}\r\n",
+                     my_dht_data.Temperature, my_dht_data.Humidity);
 
-        // 4. (Tương lai) Đóng gói thành chuỗi JSON và gửi DMA UART lên ESP32.
+            // 3. GỬI DỮ LIỆU LÊN ESP32
+            // Tạm thời sử dụng cơ chế Polling (Blocking) với Timeout = 100ms
+            HAL_UART_Transmit(&huart6, (uint8_t*)tx_buffer, strlen(tx_buffer), 100);
 
-        // Chu kỳ lấy mẫu: 2 giây theo đúng Checklist
-        osDelay(2000);
+        } else {
+            // Xử lý khi lỗi đọc cảm biến (Bắn chuỗi cảnh báo lên Dashboard)
+            const char* error_msg = "{\"error\": \"DHT22_Disconnected\"}\r\n";
+            HAL_UART_Transmit(&huart6, (uint8_t*)error_msg, strlen(error_msg), 100);
+        }
+
+        // Chu kỳ lấy mẫu: 2 giây
+        osDelay(3000);
     }
   /* USER CODE END 5 */
 }

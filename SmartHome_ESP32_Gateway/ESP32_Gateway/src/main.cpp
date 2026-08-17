@@ -21,7 +21,12 @@ extern "C" void app_main()
     // 3. Khối Code đồng bộ thời gian
     ESP_LOGI(TAG, "Dang dong bo thoi gian tu NTP Server...");
     esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    esp_sntp_setservername(0, "pool.ntp.org");
+   
+   // Phân bổ tải trọng truy vấn  cho 3 máy chủ mạnh nhất 
+    esp_sntp_setservername(0, "time.google.com");      
+    esp_sntp_setservername(1, "time.cloudflare.com");  
+    esp_sntp_setservername(2, "vn.pool.ntp.org");
+
     esp_sntp_init();
 
     time_t now;

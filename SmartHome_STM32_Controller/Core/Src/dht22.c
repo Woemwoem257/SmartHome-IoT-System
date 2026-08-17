@@ -8,31 +8,15 @@
 #include "dht22.h"
 #include "cmsis_os.h"
 
-/*
- * Macro điều khiển GPIO cực nhanh sử dụng thanh ghi BSRR
- * giúp giảm độ trễ so với việc gọi hàm HAL_GPIO_WritePin
- */
-#define DHT22_DIR_OUT() do { \
-                            GPIO_InitTypeDef GPIO_InitStruct = {0}; \
-                            GPIO_InitStruct.Pin = DHT22_PIN; \
-                            GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP; \
-                            GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH; \
-                            HAL_GPIO_Init(DHT22_PORT, &GPIO_InitStruct); \
-                        } while(0)
-
-#define DHT22_DIR_IN()  do { \
-                            GPIO_InitTypeDef GPIO_InitStruct = {0}; \
-                            GPIO_InitStruct.Pin = DHT22_PIN; \
-                            GPIO_InitStruct.Mode = GPIO_MODE_INPUT; \
-                            GPIO_InitStruct.Pull = GPIO_NOPULL; \
-                            HAL_GPIO_Init(DHT22_PORT, &GPIO_InitStruct); \
-                        } while(0)
+#define DWT_CYCCNT  (*(volatile uint32_t *)0xE0001004)
 
 // Hàm tạo trễ micro-giây (YÊU CẦU PHẢI IMPLEMENT BẰNG TIMER HOẶC DWT)
 extern void delay_us(uint32_t us);
 
 void DHT22_Init(void) {
-    DHT22_DIR_OUT();
+	// PA15 đã được cấu hình tĩnh là Open-Drain trong MX_GPIO_Init.
+	// Việc kéo chân lên SET ở chế độ OD tương đương với việc thả nổi,
+	// cho phép điện trở 10k ngoài mạch kéo điện áp lên 5V chuẩn xác.
     HAL_GPIO_WritePin(DHT22_PORT, DHT22_PIN, GPIO_PIN_SET); // Kéo lên HIGH ở trạng thái nghỉ
 }
 
@@ -45,61 +29,63 @@ bool DHT22_Read_Data(DHT22_Data_t *dht_data) {
     uint8_t data[5] = {0, 0, 0, 0, 0};
     uint8_t bit_index = 7;
     uint8_t byte_index = 0;
-    uint16_t timeout;
+    uint32_t start_tick;
+    uint32_t pulse_tick;
 
-    // 1. TÍN HIỆU START (Không đặt trong vùng Critical để tránh treo RTOS quá lâu)
-    DHT22_DIR_OUT();
+    // 1. TÍNH TOÁN NGƯỠNG THỜI GIAN THỰC
+    uint32_t ticks_per_us = HAL_RCC_GetHCLKFreq() / 1000000;
+    uint32_t threshold_40us = 40 * ticks_per_us; // Ngưỡng 40us để phân biệt bit 0 và 1
+    uint32_t timeout_100us = 100 * ticks_per_us; // Ngưỡng 100us chống treo hệ thống
+
+    // 2. TÍN HIỆU START (Không đặt trong vùng Critical để tránh treo RTOS quá lâu)
+    // Kéo LOW để đánh thức cảm biến
     HAL_GPIO_WritePin(DHT22_PORT, DHT22_PIN, GPIO_PIN_RESET);
     osDelay(2); // Giữ LOW > 1ms (osDelay dùng SysTick nên an toàn)
 
+    // Kéo HIGH để "nhả" bus, chờ DHT22 phản hồi
     HAL_GPIO_WritePin(DHT22_PORT, DHT22_PIN, GPIO_PIN_SET);
-    delay_us(30); // Giữ HIGH 20-40us
-
-    DHT22_DIR_IN(); // Chuyển sang chế độ đọc
+    delay_us(30);
 
     // ==========================================================
     // VÀO VÙNG TỚI HẠN (CRITICAL SECTION)
-    // Cấm mọi ngắt chen ngang trong 4-5ms tới
+    // Cấm ngắt bắt đầu từ đây để đếm xung micro-giây chính xác
     taskENTER_CRITICAL();
     // ==========================================================
 
-    // 2. CHỜ PHẢN HỒI TỪ CẢM BIẾN
-    timeout = 0;
+    // 3. CHỜ PHẢN HỒI TỪ CẢM BIẾN
+    start_tick = DWT_CYCCNT;
     while (HAL_GPIO_ReadPin(DHT22_PORT, DHT22_PIN) == GPIO_PIN_SET) {
-        delay_us(1);
-        if (++timeout > 100) goto READ_ERROR;
+        if ((DWT_CYCCNT - start_tick) > timeout_100us) goto READ_ERROR;
     }
 
-    timeout = 0;
-    while (HAL_GPIO_ReadPin(DHT22_PORT, DHT22_PIN) == GPIO_PIN_RESET) {
-        delay_us(1);
-        if (++timeout > 100) goto READ_ERROR;
-    }
-
-    timeout = 0;
-    while (HAL_GPIO_ReadPin(DHT22_PORT, DHT22_PIN) == GPIO_PIN_SET) {
-        delay_us(1);
-        if (++timeout > 100) goto READ_ERROR;
-    }
-
-    // 3. ĐỌC 40 BITS DỮ LIỆU
-    for (int i = 0; i < 40; i++) {
-        timeout = 0;
-        // Đợi hết xung LOW (chuẩn bị vào xung HIGH mang dữ liệu)
+    start_tick = DWT_CYCCNT;
         while (HAL_GPIO_ReadPin(DHT22_PORT, DHT22_PIN) == GPIO_PIN_RESET) {
-            delay_us(1);
-            if (++timeout > 100) goto READ_ERROR;
+            if ((DWT_CYCCNT - start_tick) > timeout_100us) goto READ_ERROR;
+	}
+
+
+	start_tick = DWT_CYCCNT;
+		while (HAL_GPIO_ReadPin(DHT22_PORT, DHT22_PIN) == GPIO_PIN_SET) {
+			if ((DWT_CYCCNT - start_tick) > timeout_100us) goto READ_ERROR;
+	}
+
+    // 4. ĐỌC 40 BITS DỮ LIỆU
+    for (int i = 0; i < 40; i++) {
+        // Đợi hết xung LOW
+    	start_tick = DWT_CYCCNT;
+        while (HAL_GPIO_ReadPin(DHT22_PORT, DHT22_PIN) == GPIO_PIN_RESET) {
+        	if ((DWT_CYCCNT - start_tick) > timeout_100us) goto READ_ERROR;
         }
 
-        timeout = 0;
+        start_tick = DWT_CYCCNT;
         // Đo độ rộng xung HIGH
         while (HAL_GPIO_ReadPin(DHT22_PORT, DHT22_PIN) == GPIO_PIN_SET) {
-            delay_us(1);
-            if (++timeout > 100) goto READ_ERROR;
+        	if ((DWT_CYCCNT - start_tick) > timeout_100us) goto READ_ERROR;
         }
+        pulse_tick = DWT_CYCCNT - start_tick; // Chốt thời gian xung HIGH
 
-        // Quyết định bit 0 hay 1 (Ngưỡng 40us)
-        if (timeout > 40) {
+        // So sánh trực tiếp số Tick phần cứng với ngưỡng 40us
+        if (pulse_tick > threshold_40us) {
             data[byte_index] |= (1 << bit_index); // Ghi bit 1
         }
 
@@ -119,11 +105,9 @@ bool DHT22_Read_Data(DHT22_Data_t *dht_data) {
 
     // 4. KIỂM TRA CHECKSUM VÀ CHUYỂN ĐỔI DỮ LIỆU
     uint8_t checksum = data[0] + data[1] + data[2] + data[3];
-    if (checksum != data[4]) {
-        return false;
-    }
+    if (checksum != data[4]) return false;
 
-    // Xử lý bit dấu của nhiệt độ
+    // Tính nhiệt độ
     uint16_t raw_temp = (data[2] << 8) | data[3];
     if (raw_temp & 0x8000) {
         raw_temp &= 0x7FFF;
