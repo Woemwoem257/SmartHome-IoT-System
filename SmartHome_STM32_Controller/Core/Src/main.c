@@ -20,7 +20,6 @@
 #include "main.h"
 #include "cmsis_os.h"
 
-
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdbool.h>
@@ -51,6 +50,8 @@ typedef struct {
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+TIM_HandleTypeDef htim3;
+
 UART_HandleTypeDef huart6;
 DMA_HandleTypeDef hdma_usart6_rx;
 
@@ -58,7 +59,7 @@ DMA_HandleTypeDef hdma_usart6_rx;
 osThreadId_t Sensor_TaskHandle;
 const osThreadAttr_t Sensor_Task_attributes = {
   .name = "Sensor_Task",
-  .stack_size = 128 * 4,
+  .stack_size = 256 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for Actuator_Task */
@@ -106,6 +107,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_USART6_UART_Init(void);
+static void MX_TIM3_Init(void);
 void StartDefaultTask(void *argument);
 void StartTask02(void *argument);
 void StartTask03(void *argument);
@@ -118,41 +120,7 @@ void Callback01(void *argument);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-// --- KHỞI TẠO DWT CHO HÀM DELAY MICRO-GIÂY ---
-#define DWT_CTRL    (*(volatile uint32_t *)0xE0001000)
-#define DWT_CYCCNT  (*(volatile uint32_t *)0xE0001004)
-#define DEMCR       (*(volatile uint32_t *)0xE000EDFC)
-#define DEMCR_TRCENA    0x01000000
 
-// Biến tĩnh lưu trữ số chu kỳ máy trên mỗi micro-giây
-static uint32_t dwt_us_ticks = 0;
-
-/**
- * @brief Khởi tạo bộ đếm chu kỳ máy (Cycle Counter)
- */
-void DWT_Init(void) {
-    DEMCR |= DEMCR_TRCENA; // Bật TRCENA
-    DWT_CYCCNT = 0;        // Reset bộ đếm
-    DWT_CTRL |= 1;         // Bật đếm chu kỳ (CYCCNTENA)
-
-// CACHE TẦN SỐ: Tính toán số tick cho 1us đúng một lần duy nhất
-dwt_us_ticks = HAL_RCC_GetHCLKFreq() / 1000000;
-}
-
-/**
- * @brief Hàm tạo trễ chính xác mức micro-giây
- * @param us Số micro-giây cần trễ
- */
-void delay_us(uint32_t us) {
-    uint32_t start_tick = DWT_CYCCNT;
-
-    // Sử dụng biến đã cache, chỉ tốn 1 chu kỳ máy để thực thi phép nhân
-    uint32_t delay_ticks = us * dwt_us_ticks;
-
-    while ((DWT_CYCCNT - start_tick) < delay_ticks) {
-        // Vòng lặp chờ bằng phần cứng, độ trễ chính xác đến từng chu kỳ (Clock Cycle)
-    }
-}
 /* USER CODE END 0 */
 
 /**
@@ -186,15 +154,9 @@ int main(void)
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_USART6_UART_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
-  /* Initialize all configured peripherals */
-    MX_GPIO_Init();
-    MX_DMA_Init();
-    MX_USART6_UART_Init();
-    /* USER CODE BEGIN 2 */
-
-    DWT_Init(); // Kích hoạt bộ đếm thời gian thực DWT
-
+    HAL_TIM_Base_Start(&htim3);
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -222,7 +184,8 @@ int main(void)
 
   /* Create the queue(s) */
   /* creation of ActuatorQueue */
-    ActuatorQueueHandle = osMessageQueueNew(10, sizeof(ControlCmd_t), &ActuatorQueue_attributes);
+  ActuatorQueueHandle = osMessageQueueNew (10, sizeof(ControlCmd_t), &ActuatorQueue_attributes);
+
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
@@ -311,6 +274,51 @@ void SystemClock_Config(void)
 }
 
 /**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 100-1;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 65535;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
   * @brief USART6 Initialization Function
   * @param None
   * @retval None
@@ -381,8 +389,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, RELAY2_Pin|RELAY1_Pin, GPIO_PIN_RESET); // Tắt tài ngay từ lúc boot vì bị dòng rò.
-  HAL_GPIO_WritePin(GPIOB, LED_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, RELAY2_Pin|RELAY1_Pin|LED_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(DATA_OUT_GPIO_Port, DATA_OUT_Pin, GPIO_PIN_SET);
@@ -394,15 +401,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(BUZZER_GPIO_Port, &GPIO_InitStruct);
 
-  /*Cấu hình Relay dùng Open-Drain (OD) để chống rò dòng 5V */
-  GPIO_InitStruct.Pin = RELAY2_Pin|RELAY1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /*Configure GPIO pins :  LED_Pin */
-  GPIO_InitStruct.Pin = LED_Pin;
+  /*Configure GPIO pins : RELAY2_Pin RELAY1_Pin LED_Pin */
+  GPIO_InitStruct.Pin = RELAY2_Pin|RELAY1_Pin|LED_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
