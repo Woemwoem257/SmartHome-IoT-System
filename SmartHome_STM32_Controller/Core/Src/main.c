@@ -507,6 +507,20 @@ bool Parse_And_Queue_JSON(const char* json_str) {
     }
 
     return parsed_any;
+
+    // --- XỬ LÝ LỆNH MỞ KHÓA BÁO ĐỘNG  ---
+        const char *p3 = strstr(json_str, "\"alarm_clear\"");
+        if (p3 != NULL) {
+            p3 = strchr(p3, ':');
+            if (p3 != NULL) {
+                int clear_cmd = atoi(p3 + 1);
+                if (clear_cmd == 1) {
+                    // Bắn cờ hiệu (Flag 0x02) sang luồng Alarm_Task để phá vỡ vòng lặp
+                    osThreadFlagsSet(Alarm_TaskHandle, 0x02);
+                    parsed_any = true;
+                }
+            }
+        }
 }
 
 /* USER CODE END 4 */
@@ -647,29 +661,40 @@ void StartTask04(void *argument)
 {
   /* USER CODE BEGIN StartTask04 */
 
-	// RÚT CẠN SEMAPHORE: Lấy Token dư thừa lúc khởi tạo (Không chờ)
-	  osSemaphoreAcquire(AlarmSemaphoreHandle, 0);
-	  /* Infinite loop */
-	for(;;)
-	  {
-	      // 1. NGỦ ĐÔNG VÔ TẬN: Task sẽ dừng ở dòng này, nhường 100% CPU cho tác vụ khác.
-	      // Nó chỉ chạy tiếp khi hàm ngắt ở trên gọi hàm Release()
-	      osSemaphoreAcquire(AlarmSemaphoreHandle, osWaitForever);
+	// RÚT CẠN SEMAPHORE: Lấy Token dư thừa lúc khởi tạo
+	    osSemaphoreAcquire(AlarmSemaphoreHandle, 0);
 
-	      // 2. KHI CÓ KHÓI (Đã vượt qua được Semaphore)
-	      // Do task có quyền Realtime, CPU sẽ lập tức chạy đoạn này, bỏ qua mọi task khác
+	    for(;;)
+	    {
+	        // 1. NGỦ ĐÔNG VÔ TẬN: Chờ Ngắt EXTI từ MQ-2
+	        osSemaphoreAcquire(AlarmSemaphoreHandle, osWaitForever);
 
-	      // Kích hoạt còi báo động (BUZZER_Pin)
-	      HAL_GPIO_WritePin(GPIOA, BUZZER_Pin, GPIO_PIN_SET);
+	        // 2. KHI CÓ KHÓI (Đã vượt qua được Semaphore)
+	        HAL_GPIO_WritePin(GPIOA, BUZZER_Pin, GPIO_PIN_SET);
 
-	      // Khóa khẩn cấp các tải AC (Giả sử Relay đang Active Low thì set lên HIGH để ngắt)
-	      HAL_GPIO_WritePin(GPIOB, RELAY1_Pin | RELAY2_Pin, GPIO_PIN_SET);
+	        // Khóa khẩn cấp các tải AC để chống cháy nổ
+	        HAL_GPIO_WritePin(GPIOB, RELAY1_Pin | RELAY2_Pin, GPIO_PIN_RESET);
 
-	      // Vòng lặp khóa chết hệ thống: Bíp còi liên tục, không cho mạch làm việc gì khác
-	      // Cho đến khi người dùng ngắt nguồn để reset
-	      while(1) {
-	          HAL_GPIO_TogglePin(GPIOA, BUZZER_Pin);
-	          osDelay(3000); // Nhịp hú của còi
+	        // 3. VÒNG LẶP BÁO ĐỘNG (Có thể bị phá vỡ)
+	        while(1) {
+	            HAL_GPIO_TogglePin(GPIOA, BUZZER_Pin);
+
+	            // THAY THẾ osDelay BẰNG osThreadFlagsWait
+	            // Hàm này sẽ chờ cờ 0x02 trong tối đa 3000ms.
+	            // Nếu hết 3000ms không có cờ, nó tự thoát (tạo nhịp hú còi).
+	            // Nếu nhận được cờ giữa chừng, nó thoát ngay lập tức.
+	            uint32_t flags = osThreadFlagsWait(0x02, osFlagsWaitAny, 3000);
+
+	            // Kiểm tra xem có đúng là cờ giải phóng (0x02) từ UART_Parse không
+	            if (flags == 0x02) {
+	                // Nhận được lệnh MỞ KHÓA từ MQTT
+	                HAL_GPIO_WritePin(GPIOA, BUZZER_Pin, GPIO_PIN_RESET); // Tắt còi
+
+	                // LƯU Ý BẢO MẬT: KHÔNG tự động bật lại Relay ở đây.
+	                // Việc bật lại Relay phải do người dùng tự thao tác qua ứng dụng sau khi đã kiểm tra an toàn.
+
+	                break; // Break khỏi vòng lặp báo động, quay về đầu hàm chờ Semaphore
+	          }
 	      }
 	  }
   /* USER CODE END StartTask04 */
