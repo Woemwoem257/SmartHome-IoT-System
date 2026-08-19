@@ -506,7 +506,6 @@ bool Parse_And_Queue_JSON(const char* json_str) {
         }
     }
 
-    return parsed_any;
 
     // --- XỬ LÝ LỆNH MỞ KHÓA BÁO ĐỘNG  ---
         const char *p3 = strstr(json_str, "\"alarm_clear\"");
@@ -521,6 +520,8 @@ bool Parse_And_Queue_JSON(const char* json_str) {
                 }
             }
         }
+
+	return parsed_any;
 }
 
 /* USER CODE END 4 */

@@ -4,6 +4,7 @@
 #include <esp_event.h>
 #include <string.h>
 #include "aws_certs.h"
+#include "uart_bridge.h"
 
 static const char *TAG = "AWS_MQTT";
 
@@ -25,9 +26,34 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             break;
             
         case MQTT_EVENT_DATA:
-            ESP_LOGI(TAG, "Nhan tin nhan tu Topic: %.*s", event->topic_len, event->topic);
-            ESP_LOGI(TAG, "Payload: %.*s", event->data_len, event->data);
-            // TƯƠNG LAI: Chuyển tiếp Payload này xuống UartBridge
+            ESP_LOGI(TAG, "MQTT_EVENT_DATA");
+            ESP_LOGI(TAG, "TOPIC=%.*s\r\n", event->topic_len, event->topic);
+            ESP_LOGI(TAG, "DATA=%.*s\r\n", event->data_len, event->data);
+
+            // --- VÁ LỖ HỔNG DOWN-LINK: ĐỊNH TUYẾN DATA XUỐNG STM32 ---
+            // Dữ liệu từ MQTT không có ký tự kết thúc chuỗi (Null-terminator).
+            // Bắt buộc phải cấp phát động một Buffer tạm để đóng gói lại.
+            {
+                // Cấp phát đủ bộ nhớ cho Data + "\r\n" + "\0"
+                char* cmd_buffer = (char*)malloc(event->data_len + 3); 
+                if (cmd_buffer != NULL) {
+                    // Copy dữ liệu gốc
+                    memcpy(cmd_buffer, event->data, event->data_len);
+                    
+                    // Thêm chuẩn kết thúc dòng để cJSON trên STM32 dễ dàng nhận diện
+                    cmd_buffer[event->data_len] = '\r';
+                    cmd_buffer[event->data_len + 1] = '\n';
+                    cmd_buffer[event->data_len + 2] = '\0';
+
+                    // Gọi hàm tĩnh từ thư viện UartBridge để bắn thẳng xuống STM32
+                    UartBridge::send_command(cmd_buffer);
+                    
+                    // Giải phóng bộ nhớ để tránh rò rỉ (Memory Leak)
+                    free(cmd_buffer);
+                } else {
+                    ESP_LOGE(TAG, "Loi: Khong du bo nho RAM de cap phat lenh UART");
+                }
+            }
             break;
             
         case MQTT_EVENT_ERROR:
@@ -36,7 +62,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 ESP_LOGE(TAG, "Loi Transport: %s", strerror(event->error_handle->esp_transport_sock_errno));
             }
             break;
-            
+          
         default:
             break;
     }

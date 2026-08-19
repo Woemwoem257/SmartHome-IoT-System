@@ -5,6 +5,7 @@
 #include <freertos/task.h>
 #include <esp_log.h>
 #include <string.h>
+#include "aws_mqtt.h"
 
 // Cấu hình Hardware Map
 #define UART_PORT_NUM      UART_NUM_1
@@ -55,6 +56,10 @@ void UartBridge::rx_task(void* arg) {
             
             // TƯƠNG LAI: Tại vị trí này, chúng ta sẽ Push chuỗi này vào một Queue.
             // MqttClient Task sẽ nằm chờ ở đầu kia Queue, bốc chuỗi này ra và Publish lên AWS IoT.
+            // --- VÁ LỖ HỔNG UP-LINK ---
+            // Gọi hàm publish của class AwsMqtt để đẩy dữ liệu lên Cloud
+            // Đảm bảo class AwsMqtt của bạn có hàm public: static void publish(const char* topic, const char* payload);
+            AwsMqtt::publish("gateway/sensor/data", (char*)data);
         }
     }
     free(data);
