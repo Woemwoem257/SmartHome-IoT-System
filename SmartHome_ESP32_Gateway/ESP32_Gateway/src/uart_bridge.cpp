@@ -6,6 +6,7 @@
 #include <esp_log.h>
 #include <string.h>
 #include "aws_mqtt.h"
+#include <cJSON.h>
 
 // Cấu hình Hardware Map
 #define UART_PORT_NUM      UART_NUM_1
@@ -41,29 +42,41 @@ void UartBridge::init() {
 }
 
 void UartBridge::rx_task(void* arg) {
-    // Cấp phát vùng nhớ đệm trên Heap
-    uint8_t* data = (uint8_t*) malloc(RX_BUF_SIZE);
+    // Cấp phát tĩnh 1 lần tại Startup, miễn nhiễm với lỗi phân mảnh Heap
+    static uint8_t data[RX_BUF_SIZE];
     
     while (1) {
-        // Hàm này sẽ tự động block task và nhường CPU cho đến khi có dữ liệu đến
-        // Timeout 100ms (portTICK_PERIOD_MS)
         int rxBytes = uart_read_bytes(UART_PORT_NUM, data, RX_BUF_SIZE - 1, 100 / portTICK_PERIOD_MS);
         
         if (rxBytes > 0) {
-            // Chốt chuỗi (Null-terminator) để in ra màn hình hoặc xử lý JSON
-            data[rxBytes] = '\0';
-            ESP_LOGI(TAG, "Nhan tu STM32: %s", (char*)data);
+            // 1. KIỂM TRA PHÂN MẢNH NGAY LẬP TỨC TRƯỚC KHI LÀM BẤT CỨ VIỆC GÌ KHÁC
+            if(rxBytes == RX_BUF_SIZE - 1){
+                ESP_LOGW(TAG, "Canh bao: UART payload cham nguong (%d bytes). Tien hanh don rac DMA.", rxBytes);
+                // Xả toàn bộ dữ liệu thừa đang kẹt trong bộ đệm cứng của UART 
+                uart_flush_input(UART_PORT_NUM);
+                // Bỏ qua mảnh vỡ này vì nó không còn nguyên vẹn
+                continue; 
+            }
+
+            // 2. TRIM DỮ LIỆU THỪA TỪ STM32
+            while (rxBytes > 0 && (data[rxBytes - 1] == '\r' || data[rxBytes - 1] == '\n')){
+                rxBytes--;
+            }
             
-            // TƯƠNG LAI: Tại vị trí này, chúng ta sẽ Push chuỗi này vào một Queue.
-            // MqttClient Task sẽ nằm chờ ở đầu kia Queue, bốc chuỗi này ra và Publish lên AWS IoT.
-            // --- VÁ LỖ HỔNG UP-LINK ---
-            // Gọi hàm publish của class AwsMqtt để đẩy dữ liệu lên Cloud
-            // Đảm bảo class AwsMqtt của bạn có hàm public: static void publish(const char* topic, const char* payload);
-            AwsMqtt::publish("gateway/sensor/data", (char*)data);
+            // 3. CHỐT CHUỖI NULL-TERMINATOR
+            data[rxBytes] = '\0';
+
+            // 4. KIỂM TRA HỢP LỆ VÀ ĐỊNH TUYẾN
+            cJSON *json = cJSON_Parse((char*)data);
+            if (json != NULL){
+                ESP_LOGI(TAG, "Nhan tu STM32: %s", (char*)data);
+                AwsMqtt::publish("gateway/sensor/data", (char*)data);
+                cJSON_Delete(json); // Dọn dẹp Heap an toàn
+            } else {
+                ESP_LOGW(TAG, "Invalid JSON from STM32: %s", (char*)data);
+            }
         }
     }
-    free(data);
-    vTaskDelete(NULL);
 }
 
 void UartBridge::send_command(const std::string& cmd) {

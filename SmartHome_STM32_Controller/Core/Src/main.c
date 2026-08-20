@@ -546,14 +546,20 @@ void StartDefaultTask(void *argument)
     for(;;)
     {
     	// 1. ĐỌC DỮ LIỆU TỪ DHT22
-        if (DHT22_Read_Data(&my_dht_data)) {
-            // 2. ĐÓNG GÓI JSON (Zero-Allocation)
-            // Cấu trúc dự kiến: {"temp": 28.5, "hum": 60.2}
-            // Sử dụng snprintf để ngăn chặn triệt để lỗi Buffer Overflow
-            snprintf(tx_buffer, sizeof(tx_buffer), "{\"temp\": %.1f, \"hum\": %.1f}\r\n",
-                     my_dht_data.Temperature, my_dht_data.Humidity);
+    	    if (DHT22_Read_Data(&my_dht_data)) {
 
-            // 3. GỬI DỮ LIỆU LÊN ESP32
+    	        // 2. ÉP KIỂU SỐ THỰC THÀNH SỐ NGUYÊN (Bảo vệ Stack)
+    	        int temp_int = (int)my_dht_data.Temperature;
+    	        int temp_frac = (int)(my_dht_data.Temperature * 10) % 10;
+
+    	        int hum_int = (int)my_dht_data.Humidity;
+    	        int hum_frac = (int)(my_dht_data.Humidity * 10) % 10;
+
+    	        // 3. ĐÓNG GÓI JSON VỚI KEY CHUẨN BACKEND (Chỉ dùng %d)
+    	        snprintf(tx_buffer, sizeof(tx_buffer), "{\"temperature\": %d.%d, \"humidity\": %d.%d}\r\n",
+    	                 temp_int, temp_frac, hum_int, hum_frac);
+
+            // 4. GỬI DỮ LIỆU LÊN ESP32
             // Tạm thời sử dụng cơ chế Polling (Blocking) với Timeout = 100ms
             HAL_UART_Transmit(&huart6, (uint8_t*)tx_buffer, strlen(tx_buffer), 100);
 
