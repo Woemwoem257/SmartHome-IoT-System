@@ -3,6 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const { connectMQTT } = require('./services/mqttService');
+const apiRoutes = require('./routes/api');
 
 // 1. Khởi tạo Web Server
 const app = express();
@@ -11,6 +12,7 @@ const PORT = process.env.PORT || 3000;
 // 2. Thiết lập Middleware Pipeline
 app.use(cors()); 
 app.use(express.json());
+app.use('/api/v1', apiRoutes);
 
 // 3. Khởi tạo Cầu nối CSDL (MongoDB Atlas)
 const connectDB = async () => {

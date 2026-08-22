@@ -2,6 +2,8 @@ const awsIot = require('aws-iot-device-sdk');
 const path = require('path');
 const Telemetry = require('../models/Telemetry');
 
+let mqttClient = null; // Biến toàn cục lưu trữ instance của device
+
 const connectMQTT = () => {
     const device = awsIot.device({
         keyPath: path.join(__dirname, '../../certs/private.pem.key'),
@@ -10,6 +12,8 @@ const connectMQTT = () => {
         clientId: `nodejs_backend_${Math.random().toString(16).slice(2, 8)}`,
         host: 'a2b1ak1ocftwcb-ats.iot.ap-southeast-2.amazonaws.com' // Kiểm tra lại Endpoint của bạn
     });
+
+    mqttClient = device; // Gán instance vào biến toàn cục
 
     device.on('connect', () => {
         console.log('[MQTT] ✅ Đã kết nối AWS IoT Core');
@@ -39,4 +43,14 @@ const connectMQTT = () => {
     });
 };
 
-module.exports = { connectMQTT };
+// Hàm xuất bản lệnh điều khiển xuống STM32/ESP32
+const publishControlCommand = (payload) => {
+    if (!mqttClient) {
+        throw new Error("MQTT Client chưa được khởi tạo");
+    }
+    const topic = 'gateway/control/actuator';
+    mqttClient.publish(topic, JSON.stringify(payload), { qos: 1 });
+    console.log(`[MQTT] 📤 Đã gửi lệnh điều khiển:`, payload);
+};
+
+module.exports = { connectMQTT, publishControlCommand };
