@@ -2,6 +2,9 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const path = require('path');
+
+// Import các module tự xây dựng 
 const { connectMQTT } = require('./services/mqttService');
 const apiRoutes = require('./routes/api');
 
@@ -12,7 +15,12 @@ const PORT = process.env.PORT || 3000;
 // 2. Thiết lập Middleware Pipeline
 app.use(cors()); 
 app.use(express.json());
+
+// Nhúng bộ định tuyến API vào tiền tố /api/v1
 app.use('/api/v1', apiRoutes);
+
+// Mở cổng phục vụ thư mục public giao diện Web
+app.use(express.static(path.join(__dirname, '../public')));
 
 // 3. Khởi tạo Cầu nối CSDL (MongoDB Atlas)
 const connectDB = async () => {
@@ -26,15 +34,7 @@ const connectDB = async () => {
     }
 };
 
-// 4. Điểm kiểm thử (Health Check Endpoint)
-app.get('/api/health', (req, res) => {
-    res.status(200).json({ 
-        status: 'OK', 
-        message: 'SmartHome Gateway Backend đang hoạt động ổn định' 
-    });
-});
-
-// 5. Trình kích hoạt Hệ thống (System Bootstrap)
+// 4. Trình kích hoạt Hệ thống (System Bootstrap)
 const startServer = async () => {
     await connectDB(); 
     connectMQTT();

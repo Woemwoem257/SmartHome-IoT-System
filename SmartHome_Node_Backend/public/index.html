@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SmartHome Dashboard</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+</head>
+<body class="bg-light">
+  <!-- Navbar -->
+  <nav class="navbar navbar-dark bg-dark mb-4 shadow">
+    <div class="container">
+      <span class="navbar-brand mb-0 h1">Hệ thống Điều khiển ESP32</span>
+    </div>
+  </nav>
+
+  <div class="container">
+    <!-- Khối Hiển thị Cảm biến -->
+    <div class="row mb-4">
+      <div class="col-md-6 mb-3">
+        <div class="card bg-primary text-white text-center shadow">
+          <div class="card-body">
+            <h5>NHIỆT ĐỘ</h5>
+            <h2 class="fw-bold"><span id="temperature">--</span> °C</h2>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6 mb-3">
+        <div class="card bg-info text-white text-center shadow">
+          <div class="card-body">
+            <h5>ĐỘ ẨM</h5>
+            <h2 class="fw-bold"><span id="humidity">--</span> %</h2>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Khối Điều khiển Thiết bị -->
+    <div class="row">
+      <!-- Cột Mosfet -->
+      <div class="col-md-6 mb-4">
+        <div class="card shadow">
+          <div class="card-header bg-dark text-white fw-bold">Quản lý Mosfet (0 - 3)</div>
+          <ul class="list-group list-group-flush" id="mosfet-list">
+            <!-- Render bằng JavaScript -->
+          </ul>
+        </div>
+      </div>
+
+      <!-- Cột Relay -->
+      <div class="col-md-6 mb-4">
+        <div class="card shadow">
+          <div class="card-header bg-dark text-white fw-bold">Quản lý Relay (0 - 3)</div>
+          <ul class="list-group list-group-flush" id="relay-list">
+            <!-- Render bằng JavaScript -->
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lớp Logic Tương tác (Client-side JavaScript) -->
+  <script>
+    // 1. Khởi tạo danh sách thiết bị
+    const mosfets = ['mosfet_0', 'mosfet_1', 'mosfet_2', 'mosfet_3'];
+    const relays = ['relay_0', 'relay_1', 'relay_2', 'relay_3'];
+    let deviceStates = {}; // Lưu trữ trạng thái on/off nội bộ
+
+    // Hàm tạo giao diện danh sách nút bấm
+    function renderDeviceList(deviceArray, containerId) {
+      const container = document.getElementById(containerId);
+      deviceArray.forEach(deviceName => {
+        deviceStates[deviceName] = 0; // Mặc định là OFF (0)
+        
+        const li = document.createElement('li');
+        li.className = 'list-group-item d-flex justify-content-between align-items-center py-3';
+        li.innerHTML = `
+          <strong class="text-uppercase">${deviceName.replace('_', ' ')}</strong>
+          <div class="d-flex align-items-center">
+            <span id="badge-${deviceName}" class="badge bg-secondary me-3">OFF</span>
+            <button id="btn-${deviceName}" class="btn btn-sm btn-primary" onclick="toggleDevice('${deviceName}')">BẬT</button>
+          </div>
+        `;
+        container.appendChild(li);
+      });
+    }
+
+    renderDeviceList(mosfets, 'mosfet-list');
+    renderDeviceList(relays, 'relay-list');
+
+    // 2. Luồng Lắng nghe Dữ liệu (GET API)
+    async function fetchLatestSensorData() {
+      try {
+        const response = await fetch('/api/v1/sensor/latest');
+        const result = await response.json();
+        
+        if (result.success) {
+          document.getElementById('temperature').innerText = result.data.temperature;
+          document.getElementById('humidity').innerText = result.data.humidity;
+        }
+      } catch (error) {
+        console.error('[Giao diện] Lỗi kết nối Cảm biến:', error);
+      }
+    }
+
+    // 3. Luồng Gửi Lệnh Điều khiển (POST API)
+    async function toggleDevice(deviceName) {
+      // Đảo ngược trạng thái hiện tại (0 -> 1, 1 -> 0)
+      const newStatus = deviceStates[deviceName] === 1 ? 0 : 1;
+      
+      try {
+        const response = await fetch('/api/v1/device/control', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device_name: deviceName, status: newStatus })
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+          // Nếu Backend báo thành công -> Cập nhật UI
+          deviceStates[deviceName] = newStatus;
+          updateDeviceUI(deviceName, newStatus);
+        } else {
+          alert('Lỗi điều khiển: ' + result.message);
+        }
+      } catch (error) {
+        console.error('[Giao diện] Lỗi điều khiển:', error);
+      }
+    }
+
+    // Hàm cập nhật màu sắc nút bấm
+    function updateDeviceUI(deviceName, status) {
+      const badge = document.getElementById(`badge-${deviceName}`);
+      const btn = document.getElementById(`btn-${deviceName}`);
+      
+      if (status === 1) {
+        badge.className = 'badge bg-success me-3';
+        badge.innerText = 'ON';
+        btn.className = 'btn btn-sm btn-danger';
+        btn.innerText = 'TẮT';
+      } else {
+        badge.className = 'badge bg-secondary me-3';
+        badge.innerText = 'OFF';
+        btn.className = 'btn btn-sm btn-primary';
+        btn.innerText = 'BẬT';
+      }
+    }
+
+    // Khởi chạy Polling Cảm biến mỗi 3 giây
+    fetchLatestSensorData();
+    setInterval(fetchLatestSensorData, 3000);
+  </script>
+</body>
+</html>
