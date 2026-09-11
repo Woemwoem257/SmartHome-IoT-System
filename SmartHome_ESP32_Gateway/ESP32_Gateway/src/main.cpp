@@ -5,12 +5,17 @@
 #include "uart_bridge.h"
 #include "aws_mqtt.h"
 #include <esp_sntp.h>
+#include "lcd_manager.h"
 
 const char *TAG = "app_main";
 
 extern "C" void app_main() 
 { 
     ESP_LOGI(TAG, "Middleware Gateway Started"); 
+
+    // Kích hoạt giao diện hiển thị phần cứng ngay từ đầu
+    ESP_LOGI(TAG, "Khoi tao man hinh ILI9341...");
+    LcdManager_Init();
 
     // 1. Kích hoạt kết nối Wi-Fi 
     WiFiManager::init();
