@@ -3,6 +3,5 @@ idf_component_register(SRCS "main.cpp"
                             "wifi_manager.cpp" 
                             "uart_bridge.cpp" 
                             "aws_mqtt.cpp"
-                            "lcd_manager.cpp"
                        INCLUDE_DIRS "."
                        REQUIRES json mqtt nvs_flash)

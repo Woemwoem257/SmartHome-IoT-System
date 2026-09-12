@@ -71,15 +71,12 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 void AwsMqtt::init() {
     esp_mqtt_client_config_t mqtt_cfg = {};
     
-    // Khai báo định danh thiết bị 
-    mqtt_cfg.credentials.client_id = "Django_Server_Client";
-    // Cấu hình mạng & Broker
-    mqtt_cfg.broker.address.uri = "mqtts://a2b1ak1ocftwcb-ats.iot.ap-southeast-2.amazonaws.com:8883"; // Port 8883 cho mTLS
-    
-// Nạp thẳng các hằng số chuỗi đã định nghĩa trong file aws_certs.h
-    mqtt_cfg.broker.verification.certificate = aws_root_ca_pem;
-    mqtt_cfg.credentials.authentication.certificate = certificate_pem_crt;
-    mqtt_cfg.credentials.authentication.key = private_pem_key;
+    // Cấu trúc API của ESP-IDF v4.4
+    mqtt_cfg.uri = "mqtts://a2b1ak1ocftwcb-ats.iot.ap-southeast-2.amazonaws.com:8883";
+    mqtt_cfg.client_id = "Django_Server_Client";
+    mqtt_cfg.cert_pem = (const char *)aws_root_ca_pem;
+    mqtt_cfg.client_cert_pem = (const char *)certificate_pem_crt;
+    mqtt_cfg.client_key_pem = (const char *)private_pem_key;
     
     ESP_LOGI(TAG, "Dang khoi tao AWS MQTT Client...");
     s_client = esp_mqtt_client_init(&mqtt_cfg);
