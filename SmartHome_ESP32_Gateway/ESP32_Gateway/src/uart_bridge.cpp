@@ -6,17 +6,64 @@
 #include <esp_log.h>
 #include <string.h>
 #include "aws_mqtt.h"
-#include <cJSON.h>
 
-// Cấu hình Hardware Map
+// 1. Kéo các thư viện mới vào
+#include <ArduinoJson.h>
+#include "hmi_manager.h" 
+
 #define UART_PORT_NUM      UART_NUM_1
 #define UART_BAUD_RATE     115200
-#define TXD_PIN            17  // Nối với chân RX của STM32
-#define RXD_PIN            16  // Nối với chân TX của STM32
+#define TXD_PIN            17
+#define RXD_PIN            16
 
 const char* UartBridge::TAG = "UART_BRIDGE";
 const int UartBridge::RX_BUF_SIZE = 1024;
 
+// 2. Kéo khóa Mutex từ main.cpp sang để bảo vệ luồng UI
+extern SemaphoreHandle_t xGuiSemaphore;
+
+// ==============================================================================
+// BỘ ĐỊNH TUYẾN DỮ LIỆU (ROUTER)
+// ==============================================================================
+static void process_json_packet(const char* json_str) {
+    // Cấp phát 256 bytes tĩnh trên Stack, không đụng đến Heap
+    StaticJsonDocument<256> doc; 
+    
+    // Phân tích chuỗi in-place
+    DeserializationError error = deserializeJson(doc, json_str);
+    if (error) {
+        ESP_LOGE("ROUTER", "Loi parse JSON: %s - Payload: %s", error.c_str(), json_str);
+        return;
+    }
+
+    // --- NHÁNH 1: DỮ LIỆU VIỄN TRẮC (SENSOR) ---
+    if (doc.containsKey("temperature") && doc.containsKey("humidity")) {
+        float temp = doc["temperature"];
+        float hum = doc["humidity"];
+        
+        // Cập nhật màn hình cục bộ qua Mutex (Đảm bảo HmiManager đã có hàm này)
+        HmiManager::update_sensor_data(temp, hum);
+        
+        // Bơm nguyên bản tin sạch lên AWS
+        AwsMqtt::publish("gateway/sensor/data", json_str);
+        ESP_LOGI("ROUTER", "Da cap nhat UI & Cloud -> Temp: %.1fC, Hum: %.1f%%", temp, hum);
+    } 
+    // --- NHÁNH 2: PHẢN HỒI THIẾT BỊ (ACTUATOR ACK) ---
+    else if (doc.containsKey("relay1")) {
+        int state = doc["relay1"];
+        AwsMqtt::publish("gateway/control/ack", json_str);
+        ESP_LOGI("ROUTER", "Nhan phan hoi Relay1: %d", state);
+    }
+    else if (doc.containsKey("relay2")) {
+        int state = doc["relay2"];
+        AwsMqtt::publish("gateway/control/ack", json_str);
+        ESP_LOGI("ROUTER", "Nhan phan hoi Relay2: %d", state);
+    }
+}
+
+// ==============================================================================
+// KHỞI TẠO UART
+// ==============================================================================
 void UartBridge::init() {
     uart_config_t uart_config = {};
     uart_config.baud_rate = UART_BAUD_RATE;
@@ -26,54 +73,47 @@ void UartBridge::init() {
     uart_config.flow_ctrl = UART_HW_FLOWCTRL_DISABLE;
     uart_config.source_clk = UART_SCLK_APB;
 
-    // 1. Nạp cấu hình
     ESP_ERROR_CHECK(uart_param_config(UART_PORT_NUM, &uart_config));
-    
-    // 2. Thiết lập chân I/O
     ESP_ERROR_CHECK(uart_set_pin(UART_PORT_NUM, TXD_PIN, RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    
-    // 3. Cài đặt Driver (Khai báo Buffer RX/TX)
     ESP_ERROR_CHECK(uart_driver_install(UART_PORT_NUM, RX_BUF_SIZE * 2, 0, 0, NULL, 0));
 
-    // 4. Khởi tạo RTOS Task để nhận dữ liệu (Gắn độ ưu tiên cao: 5)
     xTaskCreate(rx_task, "uart_rx_task", 4096, NULL, 5, NULL);
-    
     ESP_LOGI(TAG, "Hardware UART Bridge Initialized on TX:%d RX:%d", TXD_PIN, RXD_PIN);
 }
 
+// ==============================================================================
+// LUỒNG NHẬN DỮ LIỆU & BỘ ĐỆM TRƯỢT (STREAM TOKENIZER)
+// ==============================================================================
 void UartBridge::rx_task(void* arg) {
-    // Cấp phát tĩnh 1 lần tại Startup, miễn nhiễm với lỗi phân mảnh Heap
     static uint8_t data[RX_BUF_SIZE];
+    
+    // Tạo bộ đệm dòng tĩnh (Line Buffer) để hứng từng ký tự
+    static char line_buffer[256]; 
+    static uint16_t line_pos = 0;
     
     while (1) {
         int rxBytes = uart_read_bytes(UART_PORT_NUM, data, RX_BUF_SIZE - 1, 100 / portTICK_PERIOD_MS);
         
         if (rxBytes > 0) {
-            // 1. KIỂM TRA PHÂN MẢNH NGAY LẬP TỨC TRƯỚC KHI LÀM BẤT CỨ VIỆC GÌ KHÁC
-            if(rxBytes == RX_BUF_SIZE - 1){
-                ESP_LOGW(TAG, "Canh bao: UART payload cham nguong (%d bytes). Tien hanh don rac DMA.", rxBytes);
-                // Xả toàn bộ dữ liệu thừa đang kẹt trong bộ đệm cứng của UART 
-                uart_flush_input(UART_PORT_NUM);
-                // Bỏ qua mảnh vỡ này vì nó không còn nguyên vẹn
-                continue; 
-            }
-
-            // 2. TRIM DỮ LIỆU THỪA TỪ STM32
-            while (rxBytes > 0 && (data[rxBytes - 1] == '\r' || data[rxBytes - 1] == '\n')){
-                rxBytes--;
-            }
-            
-            // 3. CHỐT CHUỖI NULL-TERMINATOR
-            data[rxBytes] = '\0';
-
-            // 4. KIỂM TRA HỢP LỆ VÀ ĐỊNH TUYẾN
-            cJSON *json = cJSON_Parse((char*)data);
-            if (json != NULL){
-                ESP_LOGI(TAG, "Nhan tu STM32: %s", (char*)data);
-                AwsMqtt::publish("gateway/sensor/data", (char*)data);
-                cJSON_Delete(json); // Dọn dẹp Heap an toàn
-            } else {
-                ESP_LOGW(TAG, "Invalid JSON from STM32: %s", (char*)data);
+            // Quét từng byte trong mảng DMA
+            for (int i = 0; i < rxBytes; i++) {
+                char c = (char)data[i];
+                
+                // Ký tự ngắt dòng (Kết thúc 1 khung JSON)
+                if (c == '\n' || c == '\r') {
+                    if (line_pos > 0) {
+                        line_buffer[line_pos] = '\0'; // Đóng chuỗi String
+                        
+                        // Đẩy chuỗi hoàn chỉnh vào Router để phân tích
+                        process_json_packet(line_buffer); 
+                        
+                        line_pos = 0; // Reset bộ đệm để hứng chuỗi tiếp theo
+                    }
+                } 
+                // Ký tự thông thường (Tiếp tục nhồi vào bộ đệm)
+                else if (line_pos < sizeof(line_buffer) - 1) {
+                    line_buffer[line_pos++] = c;
+                }
             }
         }
     }

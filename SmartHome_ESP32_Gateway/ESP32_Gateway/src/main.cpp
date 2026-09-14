@@ -7,6 +7,10 @@
 #include <TFT_eSPI.h>
 #include <XPT2046_Touchscreen.h>
 #include <lvgl.h> // Gọi lõi đồ họa LVGL
+#include "hmi_manager.h"
+
+QueueHandle_t actuator_queue = NULL;
+SemaphoreHandle_t xGuiSemaphore = NULL;
 
 // Các thư viện Middleware cũ
 #include "wifi_manager.h"
@@ -96,35 +100,53 @@ void HMI_Task(void *pvParameters) {
     indev_drv.read_cb = my_touchpad_read;
     lv_indev_drv_register(&indev_drv);
 
-    // --- TEST UI: Dựng một nút bấm mẫu ở giữa màn hình ---
-    lv_obj_t *btn = lv_btn_create(lv_scr_act());
-    lv_obj_center(btn);
-    lv_obj_t *label = lv_label_create(btn);
-    lv_label_set_text(label, "Gateway Ready");
-
-    // Thêm Event để kiểm tra cảm ứng
-    lv_obj_add_event_cb(btn, [](lv_event_t * e) {
-        lv_obj_t * btn = lv_event_get_target(e);
-        lv_obj_t * label = lv_obj_get_child(btn, 0);
-        lv_label_set_text(label, "Clicked!");
-    }, LV_EVENT_CLICKED, NULL);
+    // --- XÂY DỰNG GIAO DIỆN TỪ MODULE QUẢN LÝ ---
+    HmiManager::build_ui();
 
     // 3.5. Vòng lặp duy trì sự sống HMI
+    // 3.5. Vòng lặp duy trì sự sống HMI
     while (1) {
-        lv_timer_handler(); // Trái tim của LVGL, xử lý render và event
+        // Cố gắng lấy khóa (chờ tối đa 10 ticks = 10ms)
+        if (xSemaphoreTake(xGuiSemaphore, pdMS_TO_TICKS(10)) == pdTRUE) {
+            lv_timer_handler(); // Chỉ render đồ họa khi đã cầm chắc Mutex
+            
+            // Xử lý xong phải trả khóa ngay lập tức để luồng UART có thể lấy!
+            xSemaphoreGive(xGuiSemaphore); 
+        }
+        
         vTaskDelay(pdMS_TO_TICKS(10)); // Giải phóng CPU cho RTOS Tick
+    }
+}
+
+void Actuator_Task(void *pvParameters) {
+    ControlMsg_t msg;
+    while (1) {
+        // Block task hoàn toàn cho đến khi có dữ liệu trong Queue (Tốn 0% CPU)
+        if (xQueueReceive(actuator_queue, &msg, portMAX_DELAY) == pdPASS) {
+            ESP_LOGI("ACTUATOR", "Nhan lenh -> Thiet bi: %d, Trang thai: %d", msg.device_id, msg.state);
+            
+            if (msg.device_id == DEV_RELAY_1) {
+                // Thực thi lệnh digitalWrite(RELAY_PIN, msg.state) tại đây
+            }
+        }
     }
 }
 
 extern "C" void app_main() 
 { 
     initArduino();
+    // Tạo Queue TRƯỚC KHI tạo bất kỳ Task nào
+    actuator_queue = xQueueCreate(10, sizeof(ControlMsg_t));
+    
+    // Tạo luồng Actuator (Ưu tiên cao hơn HMI để xử lý phần cứng ngay lập tức)
+    xTaskCreatePinnedToCore(Actuator_Task, "Actuator", 4096, NULL, 6, NULL, 1);
+
     ESP_LOGI(TAG, "Middleware Gateway Started"); 
 
     // --- KHỞI TẠO TẦNG VẬT LÝ ---
     vTaskDelay(pdMS_TO_TICKS(100)); 
     tft.init();
-    tft.setRotation(0);
+    tft.setRotation(2);
     tft.invertDisplay(true); // Đảo màu panel
     tft.fillScreen(TFT_BLACK);
 
@@ -133,6 +155,8 @@ extern "C" void app_main()
     ts.setRotation(2);
 
     // --- KÍCH HOẠT HMI TASK ---
+    // Trước khi khởi tạo cho HMI_Task thì bọc hàm lại
+    xGuiSemaphore = xSemaphoreCreateMutex();
     // Cấp vùng nhớ 8KB Stack để LVGL thoải mái render các Animation phức tạp
     xTaskCreatePinnedToCore(HMI_Task, "HMI_Task", 8192, NULL, 5, &HMITaskHandle, 1);
 
