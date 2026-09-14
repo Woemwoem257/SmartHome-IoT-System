@@ -5,6 +5,8 @@
 #include <string.h>
 #include "aws_certs.h"
 #include "uart_bridge.h"
+#include <ArduinoJson.h>
+#include "hmi_manager.h"
 
 static const char *TAG = "AWS_MQTT";
 
@@ -27,31 +29,45 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             
         case MQTT_EVENT_DATA:
             ESP_LOGI(TAG, "MQTT_EVENT_DATA");
-            ESP_LOGI(TAG, "TOPIC=%.*s\r\n", event->topic_len, event->topic);
-            ESP_LOGI(TAG, "DATA=%.*s\r\n", event->data_len, event->data);
+            ESP_LOGI(TAG, "TOPIC=%.*s", event->topic_len, event->topic);
+            ESP_LOGI(TAG, "DATA=%.*s", event->data_len, event->data);
 
-            // --- VÁ LỖ HỔNG DOWN-LINK: ĐỊNH TUYẾN DATA XUỐNG STM32 ---
-            // Dữ liệu từ MQTT không có ký tự kết thúc chuỗi (Null-terminator).
-            // Bắt buộc phải cấp phát động một Buffer tạm để đóng gói lại.
-            {
-                // Cấp phát đủ bộ nhớ cho Data + "\r\n" + "\0"
-                char* cmd_buffer = (char*)malloc(event->data_len + 3); 
-                if (cmd_buffer != NULL) {
-                    // Copy dữ liệu gốc
-                    memcpy(cmd_buffer, event->data, event->data_len);
-                    
-                    // Thêm chuẩn kết thúc dòng để cJSON trên STM32 dễ dàng nhận diện
-                    cmd_buffer[event->data_len] = '\r';
-                    cmd_buffer[event->data_len + 1] = '\n';
-                    cmd_buffer[event->data_len + 2] = '\0';
+            // 1. BỘ LỌC ĐỊNH TUYẾN (Chỉ xử lý gói tin điều khiển)
+            if (strncmp(event->topic, "gateway/control/actuator", event->topic_len) == 0) {
+                
+                StaticJsonDocument<256> doc;
+                DeserializationError error = deserializeJson(doc, event->data, event->data_len);
 
-                    // Gọi hàm tĩnh từ thư viện UartBridge để bắn thẳng xuống STM32
-                    UartBridge::send_command(cmd_buffer);
+                if (!error) {
+                    // --- XỬ LÝ RELAY 1 ---
+                    if (doc.containsKey("relay1")) {
+                        int state = doc["relay1"];
+                        
+                        // Cập nhật giao diện HMI
+                        HmiManager::update_relay_state(DEV_RELAY_1, state == 1);
+                        
+                        // CHUẨN HÓA LẠI CHUỖI JSON Y HỆT LOCAL CONTROL
+                        char cmd_buffer[64];
+                        snprintf(cmd_buffer, sizeof(cmd_buffer), "{\"relay1\":%d}\r\n", state);
+                        
+                        // Bắn xuống STM32
+                        UartBridge::send_command(cmd_buffer);
+                        
+                        ESP_LOGI(TAG, "Dong bo tu AWS -> STM32 Relay 1: %d", state);
+                    }
                     
-                    // Giải phóng bộ nhớ để tránh rò rỉ (Memory Leak)
-                    free(cmd_buffer);
+                    // --- XỬ LÝ RELAY 2 (DỰ PHÒNG TƯƠNG LAI) ---
+                    if (doc.containsKey("relay2")) {
+                        int state = doc["relay2"];
+                        
+                        char cmd_buffer[64];
+                        snprintf(cmd_buffer, sizeof(cmd_buffer), "{\"relay2\":%d}\r\n", state);
+                        UartBridge::send_command(cmd_buffer);
+                        
+                        ESP_LOGI(TAG, "Dong bo tu AWS -> STM32 Relay 2: %d", state);
+                    }
                 } else {
-                    ESP_LOGE(TAG, "Loi: Khong du bo nho RAM de cap phat lenh UART");
+                    ESP_LOGE(TAG, "Loi Parse JSON tu AWS: %s", error.c_str());
                 }
             }
             break;

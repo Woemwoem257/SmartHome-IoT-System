@@ -9,6 +9,7 @@
 #include <lvgl.h> // Gọi lõi đồ họa LVGL
 #include "hmi_manager.h"
 
+
 QueueHandle_t actuator_queue = NULL;
 SemaphoreHandle_t xGuiSemaphore = NULL;
 
@@ -125,9 +126,16 @@ void Actuator_Task(void *pvParameters) {
         if (xQueueReceive(actuator_queue, &msg, portMAX_DELAY) == pdPASS) {
             ESP_LOGI("ACTUATOR", "Nhan lenh -> Thiet bi: %d, Trang thai: %d", msg.device_id, msg.state);
             
+            // Cấp phát mảng tĩnh để chứa chuỗi JSON
+            char cmd[64];
+            
             if (msg.device_id == DEV_RELAY_1) {
-                // Thực thi lệnh digitalWrite(RELAY_PIN, msg.state) tại đây
+                // Đóng gói JSON chuẩn CRLF
+                snprintf(cmd, sizeof(cmd), "{\"relay1\":%d}\r\n", msg.state);
+                // Bắn qua UART xuống STM32
+                UartBridge::send_command(cmd);
             }
+            // (Tương lai) Thêm nhánh else if cho DEV_MOSFET_1 tại đây
         }
     }
 }

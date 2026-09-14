@@ -8,6 +8,7 @@ extern SemaphoreHandle_t xGuiSemaphore;
 
 // 2. Lưu trữ con trỏ Label ra phạm vi toàn cục của file này
 static lv_obj_t * label_sensor_global = NULL;
+static lv_obj_t * btn_relay1_global = NULL; 
 
 void HmiManager::build_ui() {
     // --- KHAI BÁO CÁC MÀN HÌNH ---
@@ -47,17 +48,17 @@ void HmiManager::build_ui() {
     lv_obj_align(label_sensor_global, LV_ALIGN_TOP_MID, 0, 70);
 
     // Khu vực B: Actuator (Relay Button)
-    lv_obj_t * btn_relay1 = lv_btn_create(scr_dashboard);
-    lv_obj_align(btn_relay1, LV_ALIGN_CENTER, -50, 20);
+    btn_relay1_global = lv_btn_create(scr_dashboard); 
+    lv_obj_align(btn_relay1_global, LV_ALIGN_CENTER, -50, 20);
     
     // Kích hoạt tính năng Toggle (Nhấn để Giữ trạng thái ON/OFF)
-    lv_obj_add_flag(btn_relay1, LV_OBJ_FLAG_CHECKABLE); 
+    lv_obj_add_flag(btn_relay1_global, LV_OBJ_FLAG_CHECKABLE); 
     
-    lv_obj_t * label_relay1 = lv_label_create(btn_relay1);
+    lv_obj_t * label_relay1 = lv_label_create(btn_relay1_global);
     lv_label_set_text(label_relay1, "Relay 1");
 
     // Bắt sự kiện khi trạng thái Toggle thay đổi
-    lv_obj_add_event_cb(btn_relay1, [](lv_event_t * e) {
+    lv_obj_add_event_cb(btn_relay1_global, [](lv_event_t * e) {
         lv_obj_t * btn = lv_event_get_target(e);
         bool is_on = lv_obj_has_state(btn, LV_STATE_CHECKED);
         
@@ -102,6 +103,19 @@ void HmiManager::update_sensor_data(float temp, float hum) {
         }
         
         // Bắt buộc phải nhả khóa ra để LVGL tiếp tục render khung hình
+        xSemaphoreGive(xGuiSemaphore);
+    }  
+}
+
+void HmiManager::update_relay_state(DeviceID_t id, bool is_on) {
+    if (xSemaphoreTake(xGuiSemaphore, pdMS_TO_TICKS(100)) == pdTRUE) {
+        if (id == DEV_RELAY_1 && btn_relay1_global != NULL) {
+            if (is_on) {
+                lv_obj_add_state(btn_relay1_global, LV_STATE_CHECKED);
+            } else {
+                lv_obj_clear_state(btn_relay1_global, LV_STATE_CHECKED);
+            }
+        }
         xSemaphoreGive(xGuiSemaphore);
     }
 }
