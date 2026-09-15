@@ -27,50 +27,44 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             ESP_LOGE(TAG, "Mat ket noi MQTT");
             break;
             
-        case MQTT_EVENT_DATA:
+        case MQTT_EVENT_DATA: {
             ESP_LOGI(TAG, "MQTT_EVENT_DATA");
             ESP_LOGI(TAG, "TOPIC=%.*s", event->topic_len, event->topic);
             ESP_LOGI(TAG, "DATA=%.*s", event->data_len, event->data);
 
-            // 1. BỘ LỌC ĐỊNH TUYẾN (Chỉ xử lý gói tin điều khiển)
             if (strncmp(event->topic, "gateway/control/actuator", event->topic_len) == 0) {
-                
                 StaticJsonDocument<256> doc;
                 DeserializationError error = deserializeJson(doc, event->data, event->data_len);
 
                 if (!error) {
-                    // --- XỬ LÝ RELAY 1 ---
-                    if (doc.containsKey("relay1")) {
-                        int state = doc["relay1"];
-                        
-                        // Cập nhật giao diện HMI
-                        HmiManager::update_relay_state(DEV_RELAY_1, state == 1);
-                        
-                        // CHUẨN HÓA LẠI CHUỖI JSON Y HỆT LOCAL CONTROL
-                        char cmd_buffer[64];
-                        snprintf(cmd_buffer, sizeof(cmd_buffer), "{\"relay1\":%d}\r\n", state);
-                        
-                        // Bắn xuống STM32
-                        UartBridge::send_command(cmd_buffer);
-                        
-                        ESP_LOGI(TAG, "Dong bo tu AWS -> STM32 Relay 1: %d", state);
-                    }
-                    
-                    // --- XỬ LÝ RELAY 2 (DỰ PHÒNG TƯƠNG LAI) ---
-                    if (doc.containsKey("relay2")) {
-                        int state = doc["relay2"];
-                        
-                        char cmd_buffer[64];
-                        snprintf(cmd_buffer, sizeof(cmd_buffer), "{\"relay2\":%d}\r\n", state);
-                        UartBridge::send_command(cmd_buffer);
-                        
-                        ESP_LOGI(TAG, "Dong bo tu AWS -> STM32 Relay 2: %d", state);
+                    // MẢNG ÁNH XẠ: Cấu hình Tên Key (JSON) và DeviceID tương ứng
+                    const char* keys[] = {"relay1", "relay2", "mosfet1", "mosfet2", "alarm_clear"};
+                    DeviceID_t ids[] = {DEV_RELAY_1, DEV_RELAY_2, DEV_MOSFET_1, DEV_MOSFET_2, DEV_ALARM_CLEAR};
+                    int num_devices = sizeof(keys) / sizeof(keys[0]);
+
+                    // QUÉT TOÀN BỘ GÓI TIN ĐỂ BÓC TÁCH TỪNG LỆNH
+                    for (int i = 0; i < num_devices; i++) {
+                        if (doc.containsKey(keys[i])) {
+                            int state = doc[keys[i]];
+                            
+                            // 1. Cập nhật giao diện HMI (Đồng bộ UI)
+                            HmiManager::update_actuator_state(ids[i], state == 1);
+                            
+                            // 2. Chuẩn hóa chuỗi nguyên tử (Atomic JSON) + CRLF
+                            char cmd_buffer[64];
+                            snprintf(cmd_buffer, sizeof(cmd_buffer), "{\"%s\":%d}\r\n", keys[i], state);
+                            
+                            // 3. Bắn xuống STM32
+                            UartBridge::send_command(cmd_buffer);
+                            ESP_LOGI(TAG, "Dong bo tu AWS -> STM32 [%s]: %d", keys[i], state);
+                        }
                     }
                 } else {
                     ESP_LOGE(TAG, "Loi Parse JSON tu AWS: %s", error.c_str());
                 }
             }
             break;
+        }
             
         case MQTT_EVENT_ERROR:
             ESP_LOGE(TAG, "Loi MQTT/TLS");

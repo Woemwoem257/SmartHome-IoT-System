@@ -26,10 +26,7 @@ extern SemaphoreHandle_t xGuiSemaphore;
 // BỘ ĐỊNH TUYẾN DỮ LIỆU (ROUTER)
 // ==============================================================================
 static void process_json_packet(const char* json_str) {
-    // Cấp phát 256 bytes tĩnh trên Stack, không đụng đến Heap
     StaticJsonDocument<256> doc; 
-    
-    // Phân tích chuỗi in-place
     DeserializationError error = deserializeJson(doc, json_str);
     if (error) {
         ESP_LOGE("ROUTER", "Loi parse JSON: %s - Payload: %s", error.c_str(), json_str);
@@ -40,24 +37,27 @@ static void process_json_packet(const char* json_str) {
     if (doc.containsKey("temperature") && doc.containsKey("humidity")) {
         float temp = doc["temperature"];
         float hum = doc["humidity"];
-        
-        // Cập nhật màn hình cục bộ qua Mutex (Đảm bảo HmiManager đã có hàm này)
         HmiManager::update_sensor_data(temp, hum);
-        
-        // Bơm nguyên bản tin sạch lên AWS
         AwsMqtt::publish("gateway/sensor/data", json_str);
         ESP_LOGI("ROUTER", "Da cap nhat UI & Cloud -> Temp: %.1fC, Hum: %.1f%%", temp, hum);
     } 
+    
     // --- NHÁNH 2: PHẢN HỒI THIẾT BỊ (ACTUATOR ACK) ---
-    else if (doc.containsKey("relay1")) {
-        int state = doc["relay1"];
-        AwsMqtt::publish("gateway/control/ack", json_str);
-        ESP_LOGI("ROUTER", "Nhan phan hoi Relay1: %d", state);
-    }
-    else if (doc.containsKey("relay2")) {
-        int state = doc["relay2"];
-        AwsMqtt::publish("gateway/control/ack", json_str);
-        ESP_LOGI("ROUTER", "Nhan phan hoi Relay2: %d", state);
+    const char* keys[] = {"relay1", "relay2", "mosfet1", "mosfet2", "alarm_clear"};
+    DeviceID_t ids[] = {DEV_RELAY_1, DEV_RELAY_2, DEV_MOSFET_1, DEV_MOSFET_2, DEV_ALARM_CLEAR};
+    int num_devices = sizeof(keys) / sizeof(keys[0]);
+
+    for (int i = 0; i < num_devices; i++) {
+        if (doc.containsKey(keys[i])) {
+            int state = doc[keys[i]];
+            
+            // 1. Ép giao diện UI cập nhật khớp với phản hồi từ STM32
+            HmiManager::update_actuator_state(ids[i], state == 1);
+            
+            // 2. Bắn bản tin ACK lên AWS IoT Core
+            AwsMqtt::publish("gateway/control/ack", json_str);
+            ESP_LOGI("ROUTER", "Nhan ACK tu STM32 [%s]: %d", keys[i], state);
+        }
     }
 }
 

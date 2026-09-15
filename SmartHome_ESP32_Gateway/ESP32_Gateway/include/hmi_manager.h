@@ -5,8 +5,11 @@
 
 // Định danh các thiết bị chấp hành
 typedef enum {
-    DEV_RELAY_1,
-    DEV_MOSFET_1
+    DEV_RELAY_1 = 1,
+    DEV_RELAY_2 = 2,
+    DEV_MOSFET_1 = 3,
+    DEV_MOSFET_2 = 4,
+    DEV_ALARM_CLEAR = 5 
 } DeviceID_t;
 
 // Cấu trúc gói tin điều khiển
@@ -23,5 +26,5 @@ class HmiManager {
 public:
     static void build_ui();
     static void update_sensor_data(float temp, float hum);
-    static void update_relay_state(DeviceID_t id, bool is_on);
+    static void update_actuator_state(DeviceID_t id, bool is_on);
 };

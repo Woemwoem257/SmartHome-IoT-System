@@ -9,6 +9,10 @@ extern SemaphoreHandle_t xGuiSemaphore;
 // 2. Lưu trữ con trỏ Label ra phạm vi toàn cục của file này
 static lv_obj_t * label_sensor_global = NULL;
 static lv_obj_t * btn_relay1_global = NULL; 
+static lv_obj_t * btn_relay2_global = NULL; 
+static lv_obj_t * btn_mosfet1_global = NULL; 
+static lv_obj_t * btn_mosfet2_global = NULL; 
+static lv_obj_t * btn_alarm_global = NULL; 
 
 void HmiManager::build_ui() {
     // --- KHAI BÁO CÁC MÀN HÌNH ---
@@ -47,13 +51,11 @@ void HmiManager::build_ui() {
     lv_label_set_text(label_sensor_global, "Temp: --.-C | Hum: --.-%\nWaiting for node...");
     lv_obj_align(label_sensor_global, LV_ALIGN_TOP_MID, 0, 70);
 
-    // Khu vực B: Actuator (Relay Button)
+    // Khu vực B: Actuator 
+    // --- KHU VỰC B1: RELAY 1 ---
     btn_relay1_global = lv_btn_create(scr_dashboard); 
-    lv_obj_align(btn_relay1_global, LV_ALIGN_CENTER, -50, 20);
-    
-    // Kích hoạt tính năng Toggle (Nhấn để Giữ trạng thái ON/OFF)
+    lv_obj_align(btn_relay1_global, LV_ALIGN_CENTER, -60, -10);
     lv_obj_add_flag(btn_relay1_global, LV_OBJ_FLAG_CHECKABLE); 
-    
     lv_obj_t * label_relay1 = lv_label_create(btn_relay1_global);
     lv_label_set_text(label_relay1, "Relay 1");
 
@@ -61,31 +63,97 @@ void HmiManager::build_ui() {
     lv_obj_add_event_cb(btn_relay1_global, [](lv_event_t * e) {
         lv_obj_t * btn = lv_event_get_target(e);
         bool is_on = lv_obj_has_state(btn, LV_STATE_CHECKED);
-        
-        // Đóng gói bản tin
         ControlMsg_t msg;
         msg.device_id = DEV_RELAY_1;
         msg.state = is_on ? 1 : 0;
-        
-        // Đẩy vào hàng đợi (Non-blocking: Thời gian chờ 0 ticks)
         if (actuator_queue != NULL) {
             xQueueSend(actuator_queue, &msg, 0);
         }
     }, LV_EVENT_VALUE_CHANGED, NULL);
 
-    lv_obj_t * btn_mosfet1 = lv_btn_create(scr_dashboard);
-    lv_obj_align(btn_mosfet1, LV_ALIGN_CENTER, 50, 20);
-    lv_obj_t * label_mosfet1 = lv_label_create(btn_mosfet1);
+     // --- KHU VỰC B2: RELAY 2 ---
+    btn_relay2_global = lv_btn_create(scr_dashboard); 
+    lv_obj_align(btn_relay2_global, LV_ALIGN_CENTER, 60, -10);
+    lv_obj_add_flag(btn_relay2_global, LV_OBJ_FLAG_CHECKABLE); 
+    lv_obj_t * label_relay2 = lv_label_create(btn_relay2_global);
+    lv_label_set_text(label_relay2, "Relay 2");
+
+    // Bắt sự kiện khi trạng thái Toggle thay đổi
+    lv_obj_add_event_cb(btn_relay2_global, [](lv_event_t * e) {
+        lv_obj_t * btn = lv_event_get_target(e);
+        bool is_on = lv_obj_has_state(btn, LV_STATE_CHECKED);
+        ControlMsg_t msg;
+        msg.device_id = DEV_RELAY_2;
+        msg.state = is_on ? 1 : 0;
+        if (actuator_queue != NULL) {
+            xQueueSend(actuator_queue, &msg, 0);
+        }
+    }, LV_EVENT_VALUE_CHANGED, NULL);
+
+    // --- KHU VỰC B3: MOSFET 1 ---
+    btn_mosfet1_global = lv_btn_create(scr_dashboard);
+    lv_obj_align(btn_mosfet1_global, LV_ALIGN_CENTER, -60, 50);
+    lv_obj_add_flag(btn_mosfet1_global, LV_OBJ_FLAG_CHECKABLE); // Kích hoạt Toggle
+    lv_obj_t * label_mosfet1 = lv_label_create(btn_mosfet1_global);
     lv_label_set_text(label_mosfet1, "MOSFET 1");
 
-    // Khu vực C: Alarm
-    lv_obj_t * btn_alarm = lv_btn_create(scr_dashboard);
-    lv_obj_set_style_bg_color(btn_alarm, lv_palette_main(LV_PALETTE_RED), 0);
-    lv_obj_align(btn_alarm, LV_ALIGN_BOTTOM_MID, 0, -30);
-    lv_obj_t * label_alarm = lv_label_create(btn_alarm);
-    lv_label_set_text(label_alarm, "DISABLE ALARM");
+    // Bắt sự kiện MOSFET 1 
+    lv_obj_add_event_cb(btn_mosfet1_global, [](lv_event_t * e) {
+        lv_obj_t * btn = lv_event_get_target(e);
+        bool is_on = lv_obj_has_state(btn, LV_STATE_CHECKED);
+        
+        ControlMsg_t msg;
+        msg.device_id = DEV_MOSFET_1;
+        msg.state = is_on ? 1 : 0;
+        
+        if (actuator_queue != NULL) {
+            xQueueSend(actuator_queue, &msg, 0);
+        }
+    }, LV_EVENT_VALUE_CHANGED, NULL);
 
-    // Kích hoạt màn hình đầu tiên
+    // --- KHU VỰC B4: MOSFET 2 ---
+    btn_mosfet2_global = lv_btn_create(scr_dashboard);
+    lv_obj_align(btn_mosfet2_global, LV_ALIGN_CENTER, 60, 50);
+    lv_obj_add_flag(btn_mosfet2_global, LV_OBJ_FLAG_CHECKABLE); // Kích hoạt Toggle
+    lv_obj_t * label_mosfet2 = lv_label_create(btn_mosfet2_global);
+    lv_label_set_text(label_mosfet2, "MOSFET 2");
+
+    // Bắt sự kiện MOSFET 2 
+    lv_obj_add_event_cb(btn_mosfet2_global, [](lv_event_t * e) {
+        lv_obj_t * btn = lv_event_get_target(e);
+        bool is_on = lv_obj_has_state(btn, LV_STATE_CHECKED);
+        
+        ControlMsg_t msg;
+        msg.device_id = DEV_MOSFET_2;
+        msg.state = is_on ? 1 : 0;
+        
+        if (actuator_queue != NULL) {
+            xQueueSend(actuator_queue, &msg, 0);
+        }
+    }, LV_EVENT_VALUE_CHANGED, NULL);
+
+    // Khu vực C: Alarm
+    btn_alarm_global = lv_btn_create(scr_dashboard);
+    lv_obj_set_style_bg_color(btn_alarm_global, lv_palette_main(LV_PALETTE_RED), 0);
+    lv_obj_align(btn_alarm_global, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_add_flag(btn_alarm_global, LV_OBJ_FLAG_CHECKABLE); 
+    lv_obj_t * label_alarm = lv_label_create(btn_alarm_global);
+    lv_label_set_text(label_alarm, "ALARM CONTROL");
+
+    // Bắt sự kiện ALARM 
+    lv_obj_add_event_cb(btn_alarm_global, [](lv_event_t * e) {
+        lv_obj_t * btn = lv_event_get_target(e);
+        bool is_on = lv_obj_has_state(btn, LV_STATE_CHECKED);
+        
+        ControlMsg_t msg;
+        msg.device_id = DEV_ALARM_CLEAR;
+        msg.state = is_on ? 1 : 0;
+        
+        if (actuator_queue != NULL) {
+            xQueueSend(actuator_queue, &msg, 0);
+        }
+    }, LV_EVENT_VALUE_CHANGED, NULL);
+
     lv_scr_load(scr_main);
 }
     // 3. HÀM CẬP NHẬT GIAO DIỆN AN TOÀN ĐA LUỒNG (THREAD-SAFE)
@@ -107,14 +175,20 @@ void HmiManager::update_sensor_data(float temp, float hum) {
     }  
 }
 
-void HmiManager::update_relay_state(DeviceID_t id, bool is_on) {
+void HmiManager::update_actuator_state(DeviceID_t id, bool is_on) {
     if (xSemaphoreTake(xGuiSemaphore, pdMS_TO_TICKS(100)) == pdTRUE) {
-        if (id == DEV_RELAY_1 && btn_relay1_global != NULL) {
-            if (is_on) {
-                lv_obj_add_state(btn_relay1_global, LV_STATE_CHECKED);
-            } else {
-                lv_obj_clear_state(btn_relay1_global, LV_STATE_CHECKED);
-            }
+        // Bộ định tuyến con trỏ LVGL
+        lv_obj_t * target_btn = NULL;
+        if (id == DEV_RELAY_1) target_btn = btn_relay1_global;
+        else if (id == DEV_RELAY_2) target_btn = btn_relay2_global;
+        else if (id == DEV_MOSFET_1) target_btn = btn_mosfet1_global;
+        else if (id == DEV_MOSFET_2) target_btn = btn_mosfet2_global;
+        else if (id == DEV_ALARM_CLEAR) target_btn = btn_alarm_global;
+
+        // Cập nhật trạng thái đồ họa an toàn
+        if (target_btn != NULL) {
+            if (is_on) lv_obj_add_state(target_btn, LV_STATE_CHECKED);
+            else lv_obj_clear_state(target_btn, LV_STATE_CHECKED);
         }
         xSemaphoreGive(xGuiSemaphore);
     }

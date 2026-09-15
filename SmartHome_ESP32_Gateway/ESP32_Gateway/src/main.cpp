@@ -122,20 +122,26 @@ void HMI_Task(void *pvParameters) {
 void Actuator_Task(void *pvParameters) {
     ControlMsg_t msg;
     while (1) {
-        // Block task hoàn toàn cho đến khi có dữ liệu trong Queue (Tốn 0% CPU)
         if (xQueueReceive(actuator_queue, &msg, portMAX_DELAY) == pdPASS) {
-            ESP_LOGI("ACTUATOR", "Nhan lenh -> Thiet bi: %d, Trang thai: %d", msg.device_id, msg.state);
+            ESP_LOGI("ACTUATOR", "Nhan lenh HMI -> Thiet bi: %d, Trang thai: %d", msg.device_id, msg.state);
             
-            // Cấp phát mảng tĩnh để chứa chuỗi JSON
             char cmd[64];
             
+            // Xây dựng Key JSON tương ứng với DeviceID
             if (msg.device_id == DEV_RELAY_1) {
-                // Đóng gói JSON chuẩn CRLF
                 snprintf(cmd, sizeof(cmd), "{\"relay1\":%d}\r\n", msg.state);
-                // Bắn qua UART xuống STM32
-                UartBridge::send_command(cmd);
+            }else if (msg.device_id == DEV_RELAY_2) {
+                snprintf(cmd, sizeof(cmd), "{\"relay2\":%d}\r\n", msg.state); 
+            }else if (msg.device_id == DEV_MOSFET_1) {
+                snprintf(cmd, sizeof(cmd), "{\"mosfet1\":%d}\r\n", msg.state);
+            }else if (msg.device_id == DEV_MOSFET_2) {
+                snprintf(cmd, sizeof(cmd), "{\"mosfet2\":%d}\r\n", msg.state);
+            } else if (msg.device_id == DEV_ALARM_CLEAR) {
+                snprintf(cmd, sizeof(cmd), "{\"alarm\":%d}\r\n", msg.state);
             }
-            // (Tương lai) Thêm nhánh else if cho DEV_MOSFET_1 tại đây
+            
+            // Điểm xuất dữ liệu duy nhất ra STM32
+            UartBridge::send_command(cmd);
         }
     }
 }
