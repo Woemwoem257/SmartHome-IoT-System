@@ -27,4 +27,5 @@ public:
     static void build_ui();
     static void update_sensor_data(float temp, float hum);
     static void update_actuator_state(DeviceID_t id, bool is_on);
+    static void update_network_status(bool is_connected);
 };

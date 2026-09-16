@@ -137,7 +137,7 @@ void Actuator_Task(void *pvParameters) {
             }else if (msg.device_id == DEV_MOSFET_2) {
                 snprintf(cmd, sizeof(cmd), "{\"mosfet2\":%d}\r\n", msg.state);
             } else if (msg.device_id == DEV_ALARM_CLEAR) {
-                snprintf(cmd, sizeof(cmd), "{\"alarm\":%d}\r\n", msg.state);
+                snprintf(cmd, sizeof(cmd), "{\"alarm_clear\":%d}\r\n", msg.state);
             }
             
             // Điểm xuất dữ liệu duy nhất ra STM32

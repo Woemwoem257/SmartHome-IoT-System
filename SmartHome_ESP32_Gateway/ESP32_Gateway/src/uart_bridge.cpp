@@ -43,23 +43,30 @@ static void process_json_packet(const char* json_str) {
     } 
     
     // --- NHÁNH 2: PHẢN HỒI THIẾT BỊ (ACTUATOR ACK) ---
-    const char* keys[] = {"relay1", "relay2", "mosfet1", "mosfet2", "alarm_clear"};
-    DeviceID_t ids[] = {DEV_RELAY_1, DEV_RELAY_2, DEV_MOSFET_1, DEV_MOSFET_2, DEV_ALARM_CLEAR};
-    int num_devices = sizeof(keys) / sizeof(keys[0]);
+const char* keys[] = {"relay1", "relay2", "mosfet1", "mosfet2", "alarm_clear"};
+DeviceID_t ids[] = {DEV_RELAY_1, DEV_RELAY_2, DEV_MOSFET_1, DEV_MOSFET_2, DEV_ALARM_CLEAR};
+int num_devices = sizeof(keys) / sizeof(keys[0]);
 
-    for (int i = 0; i < num_devices; i++) {
-        if (doc.containsKey(keys[i])) {
-            int state = doc[keys[i]];
-            
-            // 1. Ép giao diện UI cập nhật khớp với phản hồi từ STM32
-            HmiManager::update_actuator_state(ids[i], state == 1);
-            
-            // 2. Bắn bản tin ACK lên AWS IoT Core
-            AwsMqtt::publish("gateway/control/ack", json_str);
-            ESP_LOGI("ROUTER", "Nhan ACK tu STM32 [%s]: %d", keys[i], state);
-        }
+bool has_ack = false; // Bổ sung cờ kiểm soát
+
+for (int i = 0; i < num_devices; i++) {
+    if (doc.containsKey(keys[i])) {
+        int state = doc[keys[i]];
+        
+        // Ép giao diện UI cập nhật
+        HmiManager::update_actuator_state(ids[i], state == 1);
+        has_ack = true; // Đánh dấu có lệnh hợp lệ
+        
+        ESP_LOGI("ROUTER", "Nhan ACK tu STM32 [%s]: %d", keys[i], state);
     }
 }
+
+// CHỈ PUBLISH 1 LẦN DUY NHẤT NGOÀI VÒNG LẶP
+    if (has_ack) {
+        AwsMqtt::publish("gateway/control/ack", json_str);
+    }
+}
+
 
 // ==============================================================================
 // KHỞI TẠO UART

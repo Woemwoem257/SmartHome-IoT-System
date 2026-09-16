@@ -19,12 +19,14 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     switch ((esp_mqtt_event_id_t)event_id) {
         case MQTT_EVENT_CONNECTED:
             ESP_LOGI(TAG, "Ket noi thanh cong den AWS IoT Core");
+            HmiManager::update_network_status(true);
             // Sau khi kết nối, tiến hành Subscribe các topic điều khiển
             esp_mqtt_client_subscribe(s_client, "gateway/control/actuator", 1);
             break;
             
         case MQTT_EVENT_DISCONNECTED:
             ESP_LOGE(TAG, "Mat ket noi MQTT");
+            HmiManager::update_network_status(false);
             break;
             
         case MQTT_EVENT_DATA: {
