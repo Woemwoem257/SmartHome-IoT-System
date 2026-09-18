@@ -1,387 +1,258 @@
-# SmartHome-IoT-System 🏠
+# SmartHome IoT System 🏠
 
-Một hệ thống nhà thông minh hoàn chỉnh sử dụng IoT, kết nối các thiết bị thông qua gateway ESP32 và điều khiển bằng STM32F412, với backend Node.js và AWS IoT.
+Hệ thống nhà thông minh tích hợp ba lớp chính: gateway ESP32, bộ điều khiển STM32 và backend Node.js. Dự án mô phỏng một kiến trúc IoT thực tế với truyền dữ liệu qua Wi‑Fi/MQTT, giao tiếp UART giữa gateway và controller, và API backend để quản lý thiết bị và truy xuất dữ liệu cảm biến.
 
-## 📋 Tổng quan
+## Tóm tắt
 
-**SmartHome-IoT-System** là một nền tảng IoT tích hợp cho tự động hóa nhà thông minh, gồm:
+- ESP32 Gateway: thu thập dữ liệu, kết nối Wi‑Fi, giao tiếp MQTT với AWS IoT, nối với STM32 qua UART
+- STM32 Controller: xử lý thiết bị/relay/sensor và đưa dữ liệu lên gateway
+- Node.js Backend: API REST, kết nối MongoDB, bridge AWS IoT, nhận dữ liệu cảm biến và phát lệnh điều khiển
 
-- **Firmware nhúng**: C/Assembly cho ESP32 Gateway và STM32 Controller
-- **Backend**: Node.js với Express, MongoDB, AWS IoT SDK
-- **Kiến trúc**: 3 thành phần chính liên tương tác với nhau
+## Kiến trúc hệ thống
 
-### Thành phần chính:
-
-| Thành phần | Mô tả | Công nghệ |
-|---|---|---|
-| **ESP32 Gateway** | Gateway IoT trung tâm | C, RTOS, WiFi |
-| **STM32 Controller** | Bộ điều khiển thiết bị | C, STM32F412, HAL |
-| **Node Backend** | API Backend & Cloud | Node.js, Express, MongoDB, AWS IoT |
-
----
-
-## 📁 Cấu trúc thư mục
-
+```text
+┌──────────────────────────────┐
+│        IoT Devices/          │
+│   Sensors / Actuators        │
+└──────────────▲───────────────┘
+               │
+               │ UART / Serial
+               │
+┌──────────────┴───────────────┐
+│   STM32 Controller           │
+│   - sensor/control logic     │
+│   - HAL / device drivers     │
+└──────────────▲───────────────┘
+               │
+               │ UART / Serial
+               │
+┌──────────────┴───────────────┐
+│   ESP32 Gateway              │
+│   - WiFi client              │
+│   - MQTT client              │
+│   - UART bridge              │
+│   - HMI / command handling   │
+└──────────────▲───────────────┘
+               │
+               │ MQTT / HTTPS
+               │
+┌──────────────┴───────────────┐
+│   Node.js Backend            │
+│   - Express API              │
+│   - MongoDB                  │
+│   - AWS IoT bridge           │
+└──────────────────────────────┘
 ```
+
+## Cấu trúc repository
+
+```text
 SmartHome-IoT-System/
 ├── SmartHome_ESP32_Gateway/
-│   └── ESP32_Gateway/          # Firmware chính cho ESP32
-│       ├── main.c
-│       ├── wifi_config.h
-│       ├── mqtt_handler.c
-│       └── ...
+│   └── ESP32_Gateway/
+│       ├── src/
+│       │   ├── main.cpp
+│       │   ├── wifi_manager.cpp
+│       │   ├── uart_bridge.cpp
+│       │   ├── hmi_manager.cpp
+│       │   ├── aws_mqtt.cpp
+│       │   └── CMakeLists.txt
+│       ├── lib/
+│       ├── include/
+│       ├── platformio.ini
+│       ├── sdkconfig.*
+│       └── CMakeLists.txt
 ├── SmartHome_STM32_Controller/
-│   ├── Core/                   # Mã lõi STM32F412
-│   │   ├── Src/
-│   │   └── Inc/
-│   ├── Drivers/                # Driver HAL
-│   ├── Middlewares/            # Middleware RTOS
-│   ├── .cproject               # Cấu hình dự án Eclipse
-│   ├── Stm32_Controller.ioc    # STM32CubeMX config
-│   └── STM32F412RETX_*.ld     # Linker scripts
+│   ├── Core/
+│   ├── Drivers/
+│   ├── Middlewares/
+│   ├── .cproject
+│   ├── .mxproject
+│   ├── .project
+│   ├── Stm32_Controller.ioc
+│   ├── STM32F412RETX_FLASH.ld
+│   └── STM32F412RETX_RAM.ld
 ├── SmartHome_Node_Backend/
-│   ├── src/                    # Mã nguồn Node.js
-│   ├── public/                 # Static files (nếu có)
+│   ├── src/
+│   │   ├── server.js
+│   │   ├── routes/
+│   │   ├── controllers/
+│   │   ├── services/
+│   │   └── models/
+│   ├── public/
 │   ├── package.json
-│   └── .env                    # Configuration
-├── archive/                    # Các tệp lưu trữ
-└── .gitignore
+│   ├── package-lock.json
+│   ├── ARCHITECTURE.md
+│   └── .gitignore
+├── archive/
+├── README.md
+├── .gitignore
+└── LICENSE
 ```
 
-### 📊 Thành phần ngôn ngữ lập trình
+## Thành phần chính
 
-- **C**: 98.5% (Firmware nhúng cho ESP32 và STM32)
-- **Python**: 0.5% (Utilities/Scripts)
-- **HTML**: 0.3% (Frontend web)
-- **Assembly**: 0.3% (Optimized routines)
-- **C++**: 0.2%
-- **Linker Script**: 0.1% (STM32 memory layout)
-- **Other**: 0.1%
+### 1) SmartHome_ESP32_Gateway
 
----
+Đây là layer gateway/bridge trung tâm của hệ thống.
 
-## 🚀 Các thành phần chi tiết
+Chức năng chính:
+- Kết nối Wi‑Fi
+- Kết nối AWS IoT Core qua MQTT
+- Giao tiếp UART với STM32 controller
+- Nhận dữ liệu sensor và truyền lên cloud
+- Gửi lệnh điều khiển xuống thiết bị
 
-### 1. **SmartHome_ESP32_Gateway** 📡
-**Mục đích**: Tạo gateway WiFi để kết nối thiết bị STM32 với cloud
+Cấu trúc firmware chính:
+- `src/main.cpp`: entry point hệ thống
+- `src/wifi_manager.cpp`: quản lý Wi‑Fi
+- `src/aws_mqtt.cpp`: client MQTT AWS IoT
+- `src/uart_bridge.cpp`: bridge UART giữa ESP32 và STM32
+- `src/hmi_manager.cpp`: xử lý giao diện hoặc lệnh HMI
 
-**Chức năng chính**:
-- Kết nối WiFi
-- MQTT Client cho AWS IoT
-- Nhận/gửi dữ liệu từ STM32 Controller
-- Xử lý lệnh từ backend
+Yêu cầu phát triển:
+- PlatformIO hoặc ESP-IDF
+- ESP32 board support
+- AWS IoT certificates và endpoint
 
-**Công nghệ**:
-- Microcontroller: ESP32
-- Giao tiếp: UART/SPI với STM32
-- Cloud: AWS IoT Core MQTT
+### 2) SmartHome_STM32_Controller
 
-**Để phát triển**:
-```bash
-# Cần Arduino IDE hoặc PlatformIO
-# - ESP32 Board Support
-# - AWS IoT Arduino Library
-# - MQTT Client
-```
+Module điều khiển phần cứng dựa trên STM32F412, sử dụng project STM32CubeMX/CubeIDE.
 
----
+Các thành phần cốt lõi:
+- `Core/`: mã chính và mã phát sinh từ STM32CubeMX
+- `Drivers/`: driver HAL
+- `Middlewares/`: middleware / RTOS support
+- `Stm32_Controller.ioc`: cấu hình thiết bị và peripheral
+- `STM32F412RETX_FLASH.ld` / `STM32F412RETX_RAM.ld`: linker script
 
-### 2. **SmartHome_STM32_Controller** 🎮
-**Mục đích**: Điều khiển trung tâm cho các thiết bị thông minh
+Yêu cầu phát triển:
+- STM32CubeIDE hoặc STM32CubeMX
+- ARM GCC toolchain
+- ST-Link debugger
 
-**Thông số kỹ thuật**:
-- **MCU**: STM32F412RET6 (ARM Cortex-M4, 100MHz)
-- **RAM**: 256KB
-- **Flash**: 512KB
-- **Công cụ**: STM32CubeMX
+### 3) SmartHome_Node_Backend
 
-**Cấu trúc**:
-```
-SmartHome_STM32_Controller/
-├── Core/
-│   ├── Src/                    # Implement chính
-│   │   └── main.c
-│   └── Inc/                    # Header files
-├── Drivers/                    # STM32 HAL Drivers
-├── Middlewares/                # RTOS (FreeRTOS)
-├── .cproject                   # Eclipse IDE config
-├── .mxproject                  # CubeMX metadata
-└── Stm32_Controller.ioc        # Device config file
-```
+Backend Node.js cung cấp API và tích hợp cloud.
 
-**Linker Scripts**:
-- `STM32F412RETX_FLASH.ld` - Program từ Flash
-- `STM32F412RETX_RAM.ld` - Debug từ RAM
+Các file quan trọng:
+- `src/server.js`: khởi động Express server và kết nối MongoDB
+- `src/routes/api.js`: định tuyến API
+- `src/controllers/apiController.js`: xử lý API điều khiển và truy xuất cảm biến
+- `src/services/mqttService.js`: kết nối AWS IoT và publish/subscribe MQTT
+- `src/models/...`: schema dữ liệu (ví dụ: Telemetry)
 
-**Để build & debug**:
-```bash
-# Yêu cầu:
-# - STM32CubeIDE (hoặc Eclipse + ARM toolchain)
-# - ST-Link debugger
-# - STM32F412 Board Support Package
+Công nghệ chính:
+- Node.js
+- Express
+- MongoDB / Mongoose
+- AWS IoT SDK
+- CORS, dotenv
 
-# Build:
-make clean && make
+## Yêu cầu hệ thống
 
-# Upload:
-# Sử dụng ST-Link Utility hoặc IDE
-```
+- Node.js v18+ cho backend
+- npm
+- MongoDB (local hoặc MongoDB Atlas)
+- ESP32 + USB/UART cable
+- STM32 board + ST-Link
+- AWS IoT Core account với cert/key/CA
 
----
+## Thiết lập nhanh
 
-### 3. **SmartHome_Node_Backend** 🖥️
-**Mục đích**: API Server quản lý hệ thống, lưu trữ dữ liệu, xử lý lệnh
+### 1. Clone repository
 
-**Dependencies**:
-```json
-{
-  "express": "^5.2.1",              // Web Framework
-  "mongoose": "^9.9.3",              // MongoDB ODM
-  "aws-iot-device-sdk": "^2.2.16",   // AWS IoT Connection
-  "cors": "^2.8.6",                  // CORS middleware
-  "dotenv": "^17.4.2",               // Environment config
-  "nodemon": "^3.1.14"               // Dev auto-reload
-}
-```
-
-**Cấu trúc**:
-```
-SmartHome_Node_Backend/
-├── src/                        # Source code
-│   ├── routes/                 # API endpoints
-│   ├── models/                 # MongoDB schemas
-│   ├── controllers/            # Business logic
-│   ├── middleware/             # Custom middleware
-│   ├── config/                 # Configuration
-│   └── index.js               # Entry point
-├── public/                     # Static assets
-├── package.json
-├── .env                        # Environment variables
-└── .gitignore
-```
-
-**Để chạy**:
-```bash
-# Cài dependencies
-npm install
-
-# Development (với nodemon auto-reload)
-npm run dev
-
-# Production
-npm start
-
-# Test
-npm test
-```
-
-**Environment Variables** (`.env`):
-```env
-PORT=3000
-MONGODB_URI=mongodb://localhost:27017/smarthome
-AWS_IOT_ENDPOINT=<your-aws-iot-endpoint>
-AWS_IOT_KEY=<path-to-private-key>
-AWS_IOT_CERT=<path-to-certificate>
-NODE_ENV=development
-```
-
----
-
-## 🔌 Giao tiếp giữa các thành phần
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    AWS IoT Cloud                         │
-└─────────────────────────────────────────────────────────┘
-                          ↑↓
-                        MQTT
-                          ↑↓
-    ┌──────────────────────────────────────────┐
-    │     Node.js Backend (Express API)       │
-    │  - API Endpoints                        │
-    │  - MongoDB Database                     │
-    │  - AWS IoT Bridge                       │
-    └──────────────────────────────────────────┘
-              ↑↓ HTTP/REST
-              ↑↓
-    ┌──────────────────────────────────────────┐
-    │       ESP32 WiFi Gateway                │
-    │  - WiFi Connection                      │
-    │  - MQTT Client                          │
-    │  - Serial/UART Bridge                   │
-    └──────────────────────────────────────────┘
-              ↑↓ UART/SPI
-              ↑↓
-    ┌──────────────────────────────────────────┐
-    │     STM32F412 Controller                │
-    │  - Device Control Logic                 │
-    │  - Sensor Reading                       │
-    │  - Actuator Control                     │
-    └──────────────────────────────────────────┘
-              ↑↓
-        IoT Devices/Sensors
-```
-
----
-
-## 🛠️ Công cụ & Yêu cầu phát triển
-
-### Chung:
-- Git
-- GitHub (quản lý mã nguồn)
-
-### ESP32 Gateway:
-- Arduino IDE hoặc PlatformIO
-- ESP32 Board Support
-- USB Cable (Type-A to Micro-B)
-
-### STM32 Controller:
-- **STM32CubeIDE** (tích hợp Eclipse + ARM toolchain)
-- **STM32CubeMX** (Code Generator)
-- **ST-Link V2/V3** Debugger
-- **ARM GNU Toolchain** (arm-none-eabi-gcc)
-
-### Node.js Backend:
-- **Node.js** (v16+)
-- **npm** hoặc **yarn**
-- **MongoDB** (local hoặc Atlas)
-- **AWS IoT Account** (Free Tier)
-- **VS Code** hoặc **IDE khác**
-
----
-
-## 📦 Cách cài đặt & sử dụng
-
-### 1. Clone Repository
 ```bash
 git clone https://github.com/Woemwoem257/SmartHome-IoT-System.git
 cd SmartHome-IoT-System
 ```
 
-### 2. Setup ESP32 Gateway
-```bash
-cd SmartHome_ESP32_Gateway/ESP32_Gateway
-# Cấu hình WiFi, AWS IoT credentials
-# Upload firmware bằng Arduino IDE
-```
+### 2. Thiết lập backend
 
-### 3. Setup STM32 Controller
-```bash
-cd SmartHome_STM32_Controller
-# Mở trong STM32CubeIDE
-# Generate code từ .ioc file
-# Build project
-# Upload bằng ST-Link
-```
-
-### 4. Setup Node.js Backend
 ```bash
 cd SmartHome_Node_Backend
 npm install
-cp .env.example .env  # Thay đổi config
-npm run dev
 ```
 
----
+Tạo file `.env` ở thư mục backend với cấu hình tương tự:
 
-## 🔒 Bảo mật
+```env
+PORT=3000
+MONGODB_URI=mongodb://localhost:27017/smarthome
+NODE_ENV=development
+```
 
-- ⚠️ **Không commit** `.env` file chứa credentials
-- ✅ Dùng AWS IoT certificates thay vì plain passwords
-- ✅ Validate input trên backend
-- ✅ HTTPS cho production
-- ✅ Firmware signing cho OTA updates
+Khởi chạy server:
 
----
+```bash
+node src/server.js
+# hoặc
+npx nodemon src/server.js
+```
 
-## 📝 Ghi chú phát triển
+### 3. Thiết lập ESP32 Gateway
 
-### Những điểm cần chú ý:
+```bash
+cd SmartHome_ESP32_Gateway/ESP32_Gateway
+```
 
-1. **STM32CubeMX Code Generation**:
-   - Chỉnh sửa code trong `Core/Src` khi cần
-   - Để STM32CubeMX area không chạm vào
-   - Tạo file riêng cho custom code
+Mở project trong PlatformIO hoặc IDE hỗ trợ ESP32, sau đó:
+- cấu hình Wi‑Fi SSID/password
+- cấu hình AWS IoT endpoint và certificate
+- build + upload firmware
 
-2. **AWS IoT Connection**:
-   - Cần cấp chứng chỉ cho ESP32 & Backend
-   - Tạo MQTT topics riêng
-   - Test connection bằng AWS CLI
+### 4. Thiết lập STM32 Controller
 
-3. **MongoDB**:
-   - Tạo collections cho devices, users, logs
-   - Setup indexes cho performance
-   - Backup dữ liệu định kỳ
+```bash
+cd SmartHome_STM32_Controller
+```
 
-4. **CORS & API Security**:
-   - Cấu hình CORS cho production
-   - Validate JWT tokens
-   - Rate limiting trên API
+Mở project bằng:
+- STM32CubeIDE
+- hoặc STM32CubeMX + ARM toolchain
 
----
+Build và flash bằng ST-Link.
 
-## 🤝 Đóng góp
+## Lưu ý bảo mật
+
+- Không commit file `.env` hoặc cert/key của AWS IoT
+- Sử dụng thư mục `certs/` hoặc biến môi trường để lưu chứng chỉ
+- Không để endpoint, private key, certificate nằm trên repository public
+- Validate payload ở backend trước khi lưu dữ liệu vào MongoDB
+
+## Dữ liệu và giao tiếp
+
+Hệ thống sử dụng các luồng dữ liệu sau:
+- STM32 -> ESP32: UART/Serial
+- ESP32 -> AWS IoT: MQTT
+- ESP32 -> Backend: MQTT bridge
+- Backend -> MongoDB: lưu telemetry
+- Backend -> Device: gửi command qua MQTT topic
+
+## Tình trạng dự án
+
+Dự án đang ở dạng kiến trúc IoT prototype / lab project, tập trung vào:
+- tích hợp phần cứng và firmware
+- truyền dữ liệu IoT qua MQTT
+- backend API phục vụ giám sát và điều khiển
+
+## Đóng góp
 
 1. Fork repository
-2. Tạo branch feature (`git checkout -b feature/AmazingFeature`)
-3. Commit changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to branch (`git push origin feature/AmazingFeature`)
-5. Open Pull Request
+2. Tạo branch cho tính năng mới
+3. Commit thay đổi
+4. Push lên branch của bạn
+5. Mở pull request
 
----
+## Giấy phép
 
-## 📄 License
+Dự án đang sử dụng giấy phép ISC. Xem file `LICENSE` để biết chi tiết.
 
-Dự án này được cấp phép dưới **ISC License** - xem `LICENSE` file để chi tiết.
+## Thông tin liên hệ
 
----
+- GitHub: [Woemwoem257](https://github.com/Woemwoem257)
+- Repo: [SmartHome-IoT-System](https://github.com/Woemwoem257/SmartHome-IoT-System)
 
-## 👨‍💻 Tác giả
+## Ghi chú
 
-**Woemwoem257** - Lập trình viên full-stack IoT
-
----
-
-## 📞 Liên hệ & Hỗ trợ
-
-- 📧 Email: [email của bạn]
-- 💬 Issues: GitHub Issues
-- 📚 Documentation: [Link wiki hoặc docs]
-
----
-
-## ✨ Công nghệ nổi bật
-
-- **Embedded**: STM32F412, ESP32 (ARM Cortex-M4)
-- **Backend**: Node.js + Express + MongoDB
-- **Cloud**: AWS IoT Core
-- **Protocol**: MQTT, UART, HTTP/REST
-- **Real-time**: MQTT Publish/Subscribe
-
----
-
-**Last Updated**: September 2026
-
----
-
-### 🎯 Quick Links
-
-| Tài nguyên | Link |
-|---|---|
-| [AWS IoT Docs](https://docs.aws.amazon.com/iot/) | AWS IoT Core Documentation |
-| [STM32 Reference](https://www.st.com/en/microcontrollers/stm32f4-series.html) | STM32F412 Product Page |
-| [ESP32 Docs](https://docs.espressif.com/projects/esp-idf/en/latest/) | Espressif IoT Development Framework |
-| [Node.js Docs](https://nodejs.org/docs/) | Node.js Official Documentation |
-| [Mongoose](https://mongoosejs.com/) | MongoDB Object Modeling |
-
----
-
-### ⚡ Tính năng tiên tiến (Coming Soon)
-
-- [ ] Web Dashboard & Mobile App
-- [ ] Voice Control Integration
-- [ ] ML-based Anomaly Detection
-- [ ] OTA Firmware Updates
-- [ ] Advanced Scheduling & Automation
-- [ ] Multi-location Support
-- [ ] Energy Consumption Analytics
+README này được cập nhật để phản ánh đúng cấu trúc thư mục và triển khai hiện tại trong repository, thay vì mô tả chung mang tính ví dụ.
