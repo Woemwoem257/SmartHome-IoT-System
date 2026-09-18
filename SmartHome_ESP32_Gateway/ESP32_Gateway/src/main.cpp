@@ -35,7 +35,7 @@ TFT_eSPI tft = TFT_eSPI();
 SPIClass touchSPI(HSPI); 
 XPT2046_Touchscreen ts(TOUCH_CS, TOUCH_IRQ);
 
-static TaskHandle_t HMITaskHandle = NULL;
+TaskHandle_t HMITaskHandle = NULL;
 
 /* =========================================================================
  * 1. CALLBACK ĐẨY KHUNG HÌNH (DISPLAY FLUSH)
@@ -105,7 +105,6 @@ void HMI_Task(void *pvParameters) {
     HmiManager::build_ui();
 
     // 3.5. Vòng lặp duy trì sự sống HMI
-    // 3.5. Vòng lặp duy trì sự sống HMI
     while (1) {
         // Cố gắng lấy khóa (chờ tối đa 10 ticks = 10ms)
         if (xSemaphoreTake(xGuiSemaphore, pdMS_TO_TICKS(10)) == pdTRUE) {
@@ -115,7 +114,7 @@ void HMI_Task(void *pvParameters) {
             xSemaphoreGive(xGuiSemaphore); 
         }
         
-        vTaskDelay(pdMS_TO_TICKS(10)); // Giải phóng CPU cho RTOS Tick
+        vTaskDelay(pdMS_TO_TICKS(33)); // Giải phóng CPU cho RTOS Tick
     }
 }
 

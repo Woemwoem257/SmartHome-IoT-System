@@ -1,5 +1,6 @@
 #include "wifi_manager.h" // Dùng ngoặc kép cho file cục bộ
 #include <string.h>       // Thư viện cần thiết cho lệnh strcpy
+#include "esp_wifi.h"
 
 #define WIFI_SSID "realme 10"
 #define WIFI_PASS "woemwoem"
@@ -58,4 +59,10 @@ void WiFiManager::init() {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
+    
+    // Ép Anten Wi-Fi vào chế độ tiết kiệm điện năng
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
+    // Cài đặt công suất phát xuống 5dBm để cắt ngọn dòng khởi động
+    ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(20));
+    
 }

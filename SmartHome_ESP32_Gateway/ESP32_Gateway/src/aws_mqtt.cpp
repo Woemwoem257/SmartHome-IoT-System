@@ -8,6 +8,8 @@
 #include <ArduinoJson.h>
 #include "hmi_manager.h"
 
+extern TaskHandle_t HMITaskHandle;
+
 static const char *TAG = "AWS_MQTT";
 
 static esp_mqtt_client_handle_t s_client = NULL;
@@ -18,6 +20,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     
     switch ((esp_mqtt_event_id_t)event_id) {
         case MQTT_EVENT_CONNECTED:
+        // 1. ĐÁNH THỨC LUỒNG ĐỒ HỌA KHI KẾT NỐI THÀNH CÔNG
+            if (HMITaskHandle != NULL) vTaskResume(HMITaskHandle);
+
             ESP_LOGI(TAG, "Ket noi thanh cong den AWS IoT Core");
             HmiManager::update_network_status(true);
             // Sau khi kết nối, tiến hành Subscribe các topic điều khiển
@@ -25,6 +30,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             break;
             
         case MQTT_EVENT_DISCONNECTED:
+        // CŨNG PHẢI ĐÁNH THỨC NẾU RỚT MẠNG ĐỂ MÀN HÌNH KHÔNG BỊ ĐƠ MÃI MÃI
+            if (HMITaskHandle != NULL) vTaskResume(HMITaskHandle);
+
             ESP_LOGE(TAG, "Mat ket noi MQTT");
             HmiManager::update_network_status(false);
             break;
@@ -69,6 +77,12 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         }
             
         case MQTT_EVENT_ERROR:
+        /// ĐÁNH THỨC GIAO DIỆN NẾU CÓ LỖI TLS/TCP ĐỂ TRÁNH TREO MÀN HÌNH MÃI MÃI
+            if (HMITaskHandle != NULL) {
+                vTaskResume(HMITaskHandle);
+                ESP_LOGW(TAG, "Da danh thuc HMI Task do MQTT loi.");
+            }
+            
             ESP_LOGE(TAG, "Loi MQTT/TLS");
             if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
                 ESP_LOGE(TAG, "Loi Transport: %s", strerror(event->error_handle->esp_transport_sock_errno));
@@ -95,6 +109,13 @@ void AwsMqtt::init() {
     
     // Đăng ký Event Handler và khởi động Client
     esp_mqtt_client_register_event(s_client, MQTT_EVENT_ANY, mqtt_event_handler, NULL);
+    
+    // 2. ĐÓNG BĂNG GIAO DIỆN NGAY TRƯỚC KHI KÍCH HOẠT KẾT NỐI mTLS
+    if (HMITaskHandle != NULL) {
+        ESP_LOGW(TAG, "Dong bang HMI de tap trung dien nang cho AWS mTLS...");
+        vTaskSuspend(HMITaskHandle);
+    }
+
     esp_mqtt_client_start(s_client);
 }
 

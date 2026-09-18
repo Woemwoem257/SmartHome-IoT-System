@@ -18,6 +18,7 @@
 
 const char* UartBridge::TAG = "UART_BRIDGE";
 const int UartBridge::RX_BUF_SIZE = 1024;
+static QueueHandle_t uart_queue;
 
 // 2. Kéo khóa Mutex từ main.cpp sang để bảo vệ luồng UI
 extern SemaphoreHandle_t xGuiSemaphore;
@@ -82,7 +83,7 @@ void UartBridge::init() {
 
     ESP_ERROR_CHECK(uart_param_config(UART_PORT_NUM, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(UART_PORT_NUM, TXD_PIN, RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    ESP_ERROR_CHECK(uart_driver_install(UART_PORT_NUM, RX_BUF_SIZE * 2, 0, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_driver_install(UART_PORT_NUM, RX_BUF_SIZE * 2, RX_BUF_SIZE * 2, 20, &uart_queue, 0));
 
     xTaskCreate(rx_task, "uart_rx_task", 4096, NULL, 5, NULL);
     ESP_LOGI(TAG, "Hardware UART Bridge Initialized on TX:%d RX:%d", TXD_PIN, RXD_PIN);
@@ -92,6 +93,7 @@ void UartBridge::init() {
 // LUỒNG NHẬN DỮ LIỆU & BỘ ĐỆM TRƯỢT (STREAM TOKENIZER)
 // ==============================================================================
 void UartBridge::rx_task(void* arg) {
+    uart_event_t event;
     static uint8_t data[RX_BUF_SIZE];
     
     // Tạo bộ đệm dòng tĩnh (Line Buffer) để hứng từng ký tự
@@ -99,28 +101,47 @@ void UartBridge::rx_task(void* arg) {
     static uint16_t line_pos = 0;
     
     while (1) {
-        int rxBytes = uart_read_bytes(UART_PORT_NUM, data, RX_BUF_SIZE - 1, 100 / portTICK_PERIOD_MS);
-        
-        if (rxBytes > 0) {
-            // Quét từng byte trong mảng DMA
-            for (int i = 0; i < rxBytes; i++) {
-                char c = (char)data[i];
-                
-                // Ký tự ngắt dòng (Kết thúc 1 khung JSON)
-                if (c == '\n' || c == '\r') {
-                    if (line_pos > 0) {
-                        line_buffer[line_pos] = '\0'; // Đóng chuỗi String
-                        
-                        // Đẩy chuỗi hoàn chỉnh vào Router để phân tích
-                        process_json_packet(line_buffer); 
-                        
-                        line_pos = 0; // Reset bộ đệm để hứng chuỗi tiếp theo
+        // ĐÓNG BĂNG TASK (0% CPU): Chỉ thức dậy khi Trình phục vụ ngắt (ISR) báo có event
+        if (xQueueReceive(uart_queue, (void *)&event, (TickType_t)portMAX_DELAY)) {
+            switch (event.type) {
+                // Sự kiện: Có dữ liệu mới tràn vào thanh ghi
+                case UART_DATA:
+                    // Đọc chính xác số byte phần cứng vừa báo (event.size)
+                    uart_read_bytes(UART_PORT_NUM, data, event.size, portMAX_DELAY);
+                    
+                    // Phân tích Frame JSON dựa trên ký tự kết thúc dòng (CR/LF)
+                    for (int i = 0; i < event.size; i++) {
+                        char c = (char)data[i];
+                        if (c == '\n' || c == '\r') {
+                            if (line_pos > 0) {
+                                line_buffer[line_pos] = '\0'; 
+                                process_json_packet(line_buffer); // Đẩy vào luồng xử lý
+                                line_pos = 0; // Reset để hứng bản tin sau
+                            }
+                        } 
+                        else if (line_pos < sizeof(line_buffer) - 1) {
+                            line_buffer[line_pos++] = c;
+                        }
                     }
-                } 
-                // Ký tự thông thường (Tiếp tục nhồi vào bộ đệm)
-                else if (line_pos < sizeof(line_buffer) - 1) {
-                    line_buffer[line_pos++] = c;
-                }
+                    break;
+                    
+                // Sự kiện: Tràn bộ đệm FIFO phần cứng (Bảo vệ bộ nhớ)
+                case UART_FIFO_OVF:
+                    ESP_LOGW(TAG, "Loi: HW FIFO Overflow - Giam toc do truyen STM32 xuong");
+                    uart_flush_input(UART_PORT_NUM);
+                    xQueueReset(uart_queue);
+                    break;
+                    
+                // Sự kiện: Tràn bộ đệm Ring Buffer phần mềm (Bảo vệ bộ nhớ)
+                case UART_BUFFER_FULL:
+                    ESP_LOGW(TAG, "Loi: Ring Buffer Full - He thong dang qua tai");
+                    uart_flush_input(UART_PORT_NUM);
+                    xQueueReset(uart_queue);
+                    break;
+                    
+                // Bỏ qua các sự kiện không quan trọng khác (Break, Parity err...)
+                default:
+                    break;
             }
         }
     }

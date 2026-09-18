@@ -34,7 +34,7 @@
 /* USER CODE BEGIN PTD */
 // Định nghĩa cấu trúc bản tin điều khiển
 typedef struct {
-    uint8_t device_id;  // 1: Relay 1 | 2: Relay 2 |
+    uint8_t device_id;  // 1: Relay 1 | 2: Relay 2 | 3: MOSFET 1 | 4: MOSFET 2 | 5: ALARM
     uint8_t state;      // 0: TẮT | 1: BẬT
 } ControlCmd_t;
 /* USER CODE END PTD */
@@ -386,7 +386,8 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOC_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, BUZZER_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, MOTOR1_Pin | MOTOR2_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, RELAY2_Pin|RELAY1_Pin|LED_Pin, GPIO_PIN_RESET);
@@ -394,12 +395,12 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(DATA_OUT_GPIO_Port, DATA_OUT_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pin : BUZZER_Pin */
-  GPIO_InitStruct.Pin = BUZZER_Pin;
+  /*Configure GPIO pins : BUZZER_Pin MOTOR1_Pin MOTOR2_Pin */
+  GPIO_InitStruct.Pin = BUZZER_Pin|MOTOR1_Pin|MOTOR2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(BUZZER_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pins : RELAY2_Pin RELAY1_Pin LED_Pin */
   GPIO_InitStruct.Pin = RELAY2_Pin|RELAY1_Pin|LED_Pin;
@@ -506,14 +507,45 @@ bool Parse_And_Queue_JSON(const char* json_str) {
         }
     }
 
-
-    // --- XỬ LÝ LỆNH MỞ KHÓA BÁO ĐỘNG  ---
-        const char *p3 = strstr(json_str, "\"alarm_clear\"");
+    // --- XỬ LÝ RELAY MOSFET 1 ---
+        const char *p3 = strstr(json_str, "\"mosfet1\"");
         if (p3 != NULL) {
             p3 = strchr(p3, ':');
             if (p3 != NULL) {
-                int clear_cmd = atoi(p3 + 1);
-                if (clear_cmd == 1) {
+                int state3 = atoi(p3 + 1);
+                if (state3 == 0 || state3 == 1) {
+                    ControlCmd_t cmd3;
+                    cmd3.device_id = 3;
+                    cmd3.state = (uint8_t)state3;
+                    osMessageQueuePut(ActuatorQueueHandle, &cmd3, 0, 0); //[cite: 3]
+                    parsed_any = true;
+                }
+            }
+        }
+
+        // --- XỬ LÝ MOSFET 2 ---
+            const char *p4 = strstr(json_str, "\"mosfet2\"");
+            if (p4 != NULL) {
+                p4 = strchr(p4, ':');
+                if (p4 != NULL) {
+                    int state4 = atoi(p4 + 1);
+                    if (state4 == 0 || state4 == 1) {
+                        ControlCmd_t cmd4;
+                        cmd4.device_id = 4;
+                        cmd4.state = (uint8_t)state4;
+                        osMessageQueuePut(ActuatorQueueHandle, &cmd4, 0, 0); //[cite: 3]
+                        parsed_any = true;
+                    }
+                }
+            }
+
+    // --- XỬ LÝ LỆNH MỞ KHÓA BÁO ĐỘNG  ---
+        const char *p5 = strstr(json_str, "\"alarm_clear\"");
+        if (p5 != NULL) {
+            p5 = strchr(p5, ':');
+            if (p5 != NULL) {
+                int clear_cmd = atoi(p5 + 1);
+                if (clear_cmd == 0 || clear_cmd == 1) {
                     // Bắn cờ hiệu (Flag 0x02) sang luồng Alarm_Task để phá vỡ vòng lặp
                     osThreadFlagsSet(Alarm_TaskHandle, 0x02);
                     parsed_any = true;
@@ -609,6 +641,19 @@ void StartTask02(void *argument)
 	                  if (rx_cmd.state == 1) HAL_GPIO_WritePin(GPIOB, RELAY2_Pin, GPIO_PIN_SET);
 	                  else HAL_GPIO_WritePin(GPIOB, RELAY2_Pin, GPIO_PIN_RESET);
 	                  break;
+
+	              case 3: // Điều khiển MOSFET 1
+						// LƯU Ý: Bạn cần thay MOSFET_GPIO_Port và MOSFET_Pin bằng Macro thực tế cấu hình trong CubeMX
+						if (rx_cmd.state == 1) HAL_GPIO_WritePin(GPIOA, MOTOR1_Pin, GPIO_PIN_RESET);
+						else HAL_GPIO_WritePin(GPIOA, MOTOR1_Pin, GPIO_PIN_SET);
+						break;
+
+	              case 4: // Điều khiển MOSFET 1
+						// LƯU Ý: Bạn cần thay MOSFET_GPIO_Port và MOSFET_Pin bằng Macro thực tế cấu hình trong CubeMX
+						if (rx_cmd.state == 1) HAL_GPIO_WritePin(GPIOA, MOTOR2_Pin, GPIO_PIN_RESET);
+						else HAL_GPIO_WritePin(GPIOA, MOTOR2_Pin, GPIO_PIN_SET);
+						break;
+
 	          }
 	      }
 	  }
@@ -666,45 +711,59 @@ void StartTask03(void *argument)
 /* USER CODE END Header_StartTask04 */
 void StartTask04(void *argument)
 {
-  /* USER CODE BEGIN StartTask04 */
+    // Rút cạn token rác lúc khởi tạo
+    osSemaphoreAcquire(AlarmSemaphoreHandle, 0);
 
-	// RÚT CẠN SEMAPHORE: Lấy Token dư thừa lúc khởi tạo
-	    osSemaphoreAcquire(AlarmSemaphoreHandle, 0);
+    char uplink_msg[128]; // Bộ đệm chứa chuỗi JSON đẩy lên ESP32
 
-	    for(;;)
-	    {
-	        // 1. NGỦ ĐÔNG VÔ TẬN: Chờ Ngắt EXTI từ MQ-2
-	        osSemaphoreAcquire(AlarmSemaphoreHandle, osWaitForever);
+    for(;;)
+    {
+        // 1. NGỦ ĐÔNG VÔ TẬN: Chờ Ngắt EXTI từ MQ-2 (D_OUT_Pin)
+        osSemaphoreAcquire(AlarmSemaphoreHandle, osWaitForever);
 
-	        // 2. KHI CÓ KHÓI (Đã vượt qua được Semaphore)
-	        HAL_GPIO_WritePin(GPIOA, BUZZER_Pin, GPIO_PIN_SET);
+        // 2. PHÁT HIỆN KHÓI -> KHÓA CHÉO (INTERLOCK)
+        // Kích hoạt còi
+        HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
 
-	        // Khóa khẩn cấp các tải AC để chống cháy nổ
-	        HAL_GPIO_WritePin(GPIOB, RELAY1_Pin | RELAY2_Pin, GPIO_PIN_RESET);
+        // Khóa khẩn cấp Relay và MOSFET để chống cháy nổ (Đảm bảo an toàn Logic Đảo nếu có)
+        HAL_GPIO_WritePin(GPIOB, RELAY1_Pin | RELAY2_Pin, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(GPIOA, MOTOR1_Pin | MOTOR2_Pin, GPIO_PIN_SET); // Tùy logic phần cứng
 
-	        // 3. VÒNG LẶP BÁO ĐỘNG (Có thể bị phá vỡ)
-	        while(1) {
-	            HAL_GPIO_TogglePin(GPIOA, BUZZER_Pin);
+        // 3. ĐỒNG BỘ NGƯỢC LÊN ESP32 (BÁO CHÁY)
+        snprintf(uplink_msg, sizeof(uplink_msg), "{\"relay1\":0, \"relay2\":0, \"mosfet1\":0, \"mosfet2\":0, \"alarm_clear\":1}\r\n");
+        HAL_UART_Transmit(&huart6, (uint8_t*)uplink_msg, strlen(uplink_msg), 100);
 
-	            // THAY THẾ osDelay BẰNG osThreadFlagsWait
-	            // Hàm này sẽ chờ cờ 0x02 trong tối đa 3000ms.
-	            // Nếu hết 3000ms không có cờ, nó tự thoát (tạo nhịp hú còi).
-	            // Nếu nhận được cờ giữa chừng, nó thoát ngay lập tức.
-	            uint32_t flags = osThreadFlagsWait(0x02, osFlagsWaitAny, 3000);
+        // 4. VÒNG LẶP HÚ CÒI & CHỜ LỆNH GIẢI TRỪ
+        while(1) {
+            // Nhấp nháy còi
+            HAL_GPIO_TogglePin(BUZZER_GPIO_Port, BUZZER_Pin);
 
-	            // Kiểm tra xem có đúng là cờ giải phóng (0x02) từ UART_Parse không
-	            if (flags == 0x02) {
-	                // Nhận được lệnh MỞ KHÓA từ MQTT
-	                HAL_GPIO_WritePin(GPIOA, BUZZER_Pin, GPIO_PIN_RESET); // Tắt còi
+            // Chờ cờ 0x02 (Lệnh alarm_clear từ UART_Parse_Task) trong 500ms tạo nhịp bíp
+            uint32_t flags = osThreadFlagsWait(0x02, osFlagsWaitAny, 500);
 
-	                // LƯU Ý BẢO MẬT: KHÔNG tự động bật lại Relay ở đây.
-	                // Việc bật lại Relay phải do người dùng tự thao tác qua ứng dụng sau khi đã kiểm tra an toàn.
+            if (flags == 0x02) {
+				// 1. TẮT CÒI VÀ ĐỒNG BỘ GIAO DIỆN
+				HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
+				snprintf(uplink_msg, sizeof(uplink_msg), "{\"alarm_clear\":0}\r\n");
+				HAL_UART_Transmit(&huart6, (uint8_t*)uplink_msg, strlen(uplink_msg), 100);
 
-	                break; // Break khỏi vòng lặp báo động, quay về đầu hàm chờ Semaphore
-	          }
-	      }
-	  }
-  /* USER CODE END StartTask04 */
+				// 2. VÉT CẠN SEMAPHORE (Semaphore Draining)
+				// Loại bỏ toàn bộ các Token rác do EXTI dội phím sinh ra
+				while (osSemaphoreAcquire(AlarmSemaphoreHandle, 0) == osOK) {
+					// Bỏ qua, chỉ rút token
+				}
+
+				// 3. CHỜ KHÓI TAN (Hardware Polling)
+				// Đảm bảo cảm biến MQ-2 (D_OUT_Pin) đã trở về mức HIGH (An toàn)
+				// Tránh hiện tượng vừa thoát ra đã bị ngắt EXTI đánh sập lại
+				while (HAL_GPIO_ReadPin(D_OUT_GPIO_Port, D_OUT_Pin) == GPIO_PIN_RESET) {
+					osDelay(500); // Polling mỗi 500ms
+				}
+
+				break; // Chỉ thoát vòng lặp khi môi trường đã thực sự an toàn
+			}
+        }
+    }
 }
 
 /* Callback01 function */
