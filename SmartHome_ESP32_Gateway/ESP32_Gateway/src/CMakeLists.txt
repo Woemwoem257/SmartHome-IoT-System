@@ -4,5 +4,6 @@ idf_component_register(SRCS "main.cpp"
                             "uart_bridge.cpp" 
                             "aws_mqtt.cpp"
                             "hmi_manager.cpp"
+                            "app_tasks.cpp"
                        INCLUDE_DIRS "."
                        REQUIRES json mqtt nvs_flash)

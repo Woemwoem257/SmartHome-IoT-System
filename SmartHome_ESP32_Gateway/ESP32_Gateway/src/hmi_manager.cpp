@@ -2,9 +2,7 @@
 #include <stdio.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
-
-// 1. Kéo Mutex từ main.cpp sang
-extern SemaphoreHandle_t xGuiSemaphore;
+#include "app_tasks.h"
 
 // 2. Lưu trữ con trỏ Label ra phạm vi toàn cục của file này
 static lv_obj_t * label_sensor_global = NULL;
@@ -75,7 +73,7 @@ void HmiManager::build_ui() {
     lv_label_set_text(lv_label_create(btn_relay1_global), LV_SYMBOL_POWER " L1");
     lv_obj_add_event_cb(btn_relay1_global, [](lv_event_t * e) {
         ControlMsg_t msg = {DEV_RELAY_1, (uint8_t)(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED) ? 1 : 0)};
-        if (actuator_queue != NULL) xQueueSend(actuator_queue, &msg, 0);
+        App_SendActuatorCmd(msg);
     }, LV_EVENT_VALUE_CHANGED, NULL);
 
     // Relay 2 (Đèn)
@@ -86,7 +84,7 @@ void HmiManager::build_ui() {
     lv_label_set_text(lv_label_create(btn_relay2_global), LV_SYMBOL_POWER " L2");
     lv_obj_add_event_cb(btn_relay2_global, [](lv_event_t * e) {
         ControlMsg_t msg = {DEV_RELAY_2, (uint8_t)(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED) ? 1 : 0)};
-        if (actuator_queue != NULL) xQueueSend(actuator_queue, &msg, 0);
+        App_SendActuatorCmd(msg);
     }, LV_EVENT_VALUE_CHANGED, NULL);
 
     // MOSFET 1 (Quạt)
@@ -97,7 +95,7 @@ void HmiManager::build_ui() {
     lv_label_set_text(lv_label_create(btn_mosfet1_global), LV_SYMBOL_POWER " Fan 1");
     lv_obj_add_event_cb(btn_mosfet1_global, [](lv_event_t * e) {
         ControlMsg_t msg = {DEV_MOSFET_1, (uint8_t)(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED) ? 1 : 0)};
-        if (actuator_queue != NULL) xQueueSend(actuator_queue, &msg, 0);
+        App_SendActuatorCmd(msg);
     }, LV_EVENT_VALUE_CHANGED, NULL);
 
     // MOSFET 2 (Quạt)
@@ -108,7 +106,7 @@ void HmiManager::build_ui() {
     lv_label_set_text(lv_label_create(btn_mosfet2_global), LV_SYMBOL_POWER " Fan 2");
     lv_obj_add_event_cb(btn_mosfet2_global, [](lv_event_t * e) {
         ControlMsg_t msg = {DEV_MOSFET_2, (uint8_t)(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED) ? 1 : 0)};
-        if (actuator_queue != NULL) xQueueSend(actuator_queue, &msg, 0);
+        App_SendActuatorCmd(msg);
     }, LV_EVENT_VALUE_CHANGED, NULL);
 
     // --- NÚT BÁO ĐỘNG ---
@@ -121,7 +119,7 @@ void HmiManager::build_ui() {
     lv_label_set_text(lv_label_create(btn_alarm_global), LV_SYMBOL_BELL " ALARM STATUS");
     lv_obj_add_event_cb(btn_alarm_global, [](lv_event_t * e) {
         ControlMsg_t msg = {DEV_ALARM_CLEAR, (uint8_t)(lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED) ? 1 : 0)};
-        if (actuator_queue != NULL) xQueueSend(actuator_queue, &msg, 0);
+        App_SendActuatorCmd(msg);
     }, LV_EVENT_VALUE_CHANGED, NULL);
 
     // 3. Khởi chạy màn hình Welcome đầu tiên
@@ -131,7 +129,7 @@ void HmiManager::build_ui() {
     // 3. HÀM CẬP NHẬT GIAO DIỆN AN TOÀN ĐA LUỒNG (THREAD-SAFE)
 void HmiManager::update_sensor_data(float temp, float hum) {
     // Chờ tối đa 100 Ticks (100ms) để lấy chìa khóa Mutex từ luồng HMI_Task
-    if (xSemaphoreTake(xGuiSemaphore, pdMS_TO_TICKS(100)) == pdTRUE) {
+    if (App_TakeGuiMutex(100)) {
         
         // 1. Đọc trạng thái hiện tại của nút Báo động để suy ra trạng thái khói
         bool is_smoke_detected = false;
@@ -152,12 +150,12 @@ void HmiManager::update_sensor_data(float temp, float hum) {
         }
         
         // Bắt buộc phải nhả khóa ra để LVGL tiếp tục render khung hình
-        xSemaphoreGive(xGuiSemaphore);
+        App_GiveGuiMutex();
     }  
 }
 
 void HmiManager::update_actuator_state(DeviceID_t id, bool is_on) {
-    if (xSemaphoreTake(xGuiSemaphore, pdMS_TO_TICKS(100)) == pdTRUE) {
+    if (App_TakeGuiMutex(100)) {
         // Bộ định tuyến con trỏ LVGL
         lv_obj_t * target_btn = NULL;
         if (id == DEV_RELAY_1) target_btn = btn_relay1_global;
@@ -171,12 +169,12 @@ void HmiManager::update_actuator_state(DeviceID_t id, bool is_on) {
             if (is_on) lv_obj_add_state(target_btn, LV_STATE_CHECKED);
             else lv_obj_clear_state(target_btn, LV_STATE_CHECKED);
         }
-        xSemaphoreGive(xGuiSemaphore);
+        App_GiveGuiMutex();
     }
 }
 
 void HmiManager::update_network_status(bool is_connected) {
-    if (xSemaphoreTake(xGuiSemaphore, pdMS_TO_TICKS(50)) == pdTRUE) {
+    if (App_TakeGuiMutex(50)) {
         if (label_wifi_global != NULL) {
             if (is_connected) {
                 lv_label_set_text(label_wifi_global, LV_SYMBOL_WIFI " AWS: OK");
@@ -186,6 +184,6 @@ void HmiManager::update_network_status(bool is_connected) {
                 lv_obj_set_style_text_color(label_wifi_global, lv_palette_main(LV_PALETTE_RED), 0);
             }
         }
-        xSemaphoreGive(xGuiSemaphore);
+        App_GiveGuiMutex();
     }
 }

@@ -20,9 +20,6 @@ const char* UartBridge::TAG = "UART_BRIDGE";
 const int UartBridge::RX_BUF_SIZE = 1024;
 static QueueHandle_t uart_queue;
 
-// 2. Kéo khóa Mutex từ main.cpp sang để bảo vệ luồng UI
-extern SemaphoreHandle_t xGuiSemaphore;
-
 // ==============================================================================
 // BỘ ĐỊNH TUYẾN DỮ LIỆU (ROUTER)
 // ==============================================================================

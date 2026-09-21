@@ -1,9 +1,8 @@
 #include "wifi_manager.h" // Dùng ngoặc kép cho file cục bộ
 #include <string.h>       // Thư viện cần thiết cho lệnh strcpy
 #include "esp_wifi.h"
+#include "secrets.h"
 
-#define WIFI_SSID "realme 10"
-#define WIFI_PASS "woemwoem"
 #define MAXIMUM_RETRY 5
 
 // 1. Khởi tạo các biến Static của class (Bắt buộc phải nằm ở .cpp)
@@ -52,8 +51,8 @@ void WiFiManager::init() {
     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &WiFiManager::event_handler, NULL, NULL));
 
     wifi_config_t wifi_config = {};
-    strcpy((char*)wifi_config.sta.ssid, WIFI_SSID);
-    strcpy((char*)wifi_config.sta.password, WIFI_PASS);
+    strcpy((char*)wifi_config.sta.ssid, SECRET_WIFI_SSID);
+    strcpy((char*)wifi_config.sta.password, SECRET_WIFI_PASS);
     wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
