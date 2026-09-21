@@ -89,26 +89,55 @@ bool DHT22_Read_Data(DHT22_Data_t *dht_data) {
         }
     }
 
-    // ==========================================================
-    taskEXIT_CRITICAL();
-    // ==========================================================
+    	// ==========================================================
+        taskEXIT_CRITICAL();
+        // ==========================================================
 
-    // 4. KIỂM TRA CHECKSUM VÀ CHUYỂN ĐỔI DỮ LIỆU
-    uint8_t checksum = data[0] + data[1] + data[2] + data[3];
-    if (checksum != data[4]) return false;
+        // 4. KIỂM TRA CHECKSUM VÀ CHUYỂN ĐỔI DỮ LIỆU
+        uint8_t checksum = data[0] + data[1] + data[2] + data[3];
+        if (checksum != data[4]) return false;
 
-    uint16_t raw_temp = (data[2] << 8) | data[3];
-    if (raw_temp & 0x8000) {
-        raw_temp &= 0x7FFF;
-        dht_data->Temperature = (float)raw_temp / -10.0f;
-    } else {
-        dht_data->Temperature = (float)raw_temp / 10.0f;
+        float calc_temp, calc_hum;
+        uint16_t raw_temp = (data[2] << 8) | data[3];
+        if (raw_temp & 0x8000) {
+            raw_temp &= 0x7FFF;
+            calc_temp = (float)raw_temp / -10.0f;
+        } else {
+            calc_temp = (float)raw_temp / 10.0f;
+        }
+
+        calc_hum = (float)((data[0] << 8) | data[1]) / 10.0f;
+
+        // 5. BỘ LỌC BIÊN ĐỘ (BOUNDARY CHECK)
+        // Chặn đứng các giá trị rác do nhiễu điện từ (EMI) vượt quá ngưỡng vật lý của DHT22
+        if (calc_temp < -40.0f || calc_temp > 80.0f) return false;
+        if (calc_hum < 0.0f || calc_hum > 100.0f) return false;
+
+        // 6. BỘ LỌC TRUNG BÌNH TRƯỢT HÀM MŨ (EWMA - ĐỂ LÀM MỊN ĐƯỜNG ĐẶC TÍNH)
+        static float filtered_temp = 0.0f;
+        static float filtered_hum = 0.0f;
+        static bool first_reading = true;
+
+        // Hệ số Alpha = 0.2: Tin tưởng 20% vào giá trị mới, giữ lại 80% lịch sử cũ để triệt tiêu gai nhiễu
+        #define EWMA_ALPHA 0.2f
+
+        if (first_reading) {
+            // Lần đọc hợp lệ đầu tiên sẽ khởi tạo bộ lọc để tránh giá trị bị kéo lê từ 0 lên
+            filtered_temp = calc_temp;
+            filtered_hum = calc_hum;
+            first_reading = false;
+        } else {
+            filtered_temp = (EWMA_ALPHA * calc_temp) + ((1.0f - EWMA_ALPHA) * filtered_temp);
+            filtered_hum = (EWMA_ALPHA * calc_hum) + ((1.0f - EWMA_ALPHA) * filtered_hum);
+        }
+
+        // Trả về dữ liệu đã được lọc sạch
+        dht_data->Temperature = filtered_temp;
+        dht_data->Humidity = filtered_hum;
+
+        return true;
+
+    READ_ERROR:
+        taskEXIT_CRITICAL();
+        return false;
     }
-
-    dht_data->Humidity = (float)((data[0] << 8) | data[1]) / 10.0f;
-    return true;
-
-READ_ERROR:
-    taskEXIT_CRITICAL();
-    return false;
-}

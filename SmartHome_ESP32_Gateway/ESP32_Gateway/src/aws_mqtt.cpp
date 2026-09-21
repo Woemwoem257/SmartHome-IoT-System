@@ -102,6 +102,8 @@ void AwsMqtt::init() {
     mqtt_cfg.cert_pem = (const char *)aws_root_ca_pem;
     mqtt_cfg.client_cert_pem = (const char *)certificate_pem_crt;
     mqtt_cfg.client_key_pem = (const char *)private_pem_key;
+    // THÊM DÒNG NÀY: Ép AWS và ESP32 chỉ "hỏi thăm" nhau mỗi 2 phút một lần
+    mqtt_cfg.keepalive = 120;
     
     ESP_LOGI(TAG, "Dang khoi tao AWS MQTT Client...");
     s_client = esp_mqtt_client_init(&mqtt_cfg);

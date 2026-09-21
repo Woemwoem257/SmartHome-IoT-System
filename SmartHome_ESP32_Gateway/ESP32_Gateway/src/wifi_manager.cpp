@@ -61,7 +61,8 @@ void WiFiManager::init() {
     
     // Ép Anten Wi-Fi vào chế độ tiết kiệm điện năng
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
-    // Cài đặt công suất phát xuống 5dBm để cắt ngọn dòng khởi động
-    // ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(20));
+    // Ép công suất phát xuống khoảng 10dBm (tham số truyền vào là 40, vì 40 * 0.25 = 10dBm)
+    // Giảm triệt để đỉnh dòng 500mA xuống còn khoảng 250mA
+    ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(40));
     
 }
