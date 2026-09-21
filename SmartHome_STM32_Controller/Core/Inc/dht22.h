@@ -8,7 +8,7 @@
 #ifndef DHT22_H_
 #define DHT22_H_
 
-#include "main.h"
+#include "stm32f4xx_hal.h"
 #include <stdbool.h>
 
 // Định nghĩa cấu trúc lưu trữ dữ liệu
@@ -17,12 +17,8 @@ typedef struct {
     float Humidity;
 } DHT22_Data_t;
 
-// Cấu hình chân GPIO giao tiếp (Đồng bộ với CubeMX)
-#define DHT22_PORT DATA_OUT_GPIO_Port
-#define DHT22_PIN  DATA_OUT_Pin
-
-// Các hàm API giao tiếp
-void DHT22_Init(void);
+// Các hàm API giao tiếp (Đã tiêm phụ thuộc phần cứng vào tham số)
+void DHT22_Init(TIM_HandleTypeDef *timer, GPIO_TypeDef *port, uint16_t pin);
 bool DHT22_Read_Data(DHT22_Data_t *dht_data);
 
 #endif /* DHT22_H_ */

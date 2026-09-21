@@ -24,19 +24,18 @@
 /* USER CODE BEGIN Includes */
 #include <stdbool.h>
 #include <string.h>
-#include "cJSON.h"
 #include "dht22.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include "app_types.h"
+#include "actuator.h"
+#include "uart_protocol.h"
+#include "app_tasks.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-// Định nghĩa cấu trúc bản tin điều khiển
-typedef struct {
-    uint8_t device_id;  // 1: Relay 1 | 2: Relay 2 | 3: MOSFET 1 | 4: MOSFET 2 | 5: ALARM
-    uint8_t state;      // 0: TẮT | 1: BẬT
-} ControlCmd_t;
+
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -55,51 +54,11 @@ TIM_HandleTypeDef htim3;
 UART_HandleTypeDef huart6;
 DMA_HandleTypeDef hdma_usart6_rx;
 
-/* Definitions for Sensor_Task */
-osThreadId_t Sensor_TaskHandle;
-const osThreadAttr_t Sensor_Task_attributes = {
-  .name = "Sensor_Task",
-  .stack_size = 256 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
-};
-/* Definitions for Actuator_Task */
-osThreadId_t Actuator_TaskHandle;
-const osThreadAttr_t Actuator_Task_attributes = {
-  .name = "Actuator_Task",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
-};
-/* Definitions for UART_Parse_Task */
-osThreadId_t UART_Parse_TaskHandle;
-const osThreadAttr_t UART_Parse_Task_attributes = {
-  .name = "UART_Parse_Task",
-  .stack_size = 256 * 4,
-  .priority = (osPriority_t) osPriorityAboveNormal,
-};
-/* Definitions for Alarm_Task */
-osThreadId_t Alarm_TaskHandle;
-const osThreadAttr_t Alarm_Task_attributes = {
-  .name = "Alarm_Task",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityRealtime,
-};
-/* Definitions for ActuatorQueue */
-osMessageQueueId_t ActuatorQueueHandle;
-const osMessageQueueAttr_t ActuatorQueue_attributes = {
-  .name = "ActuatorQueue"
-};
-/* Definitions for Timer_Heartbeat */
-osTimerId_t Timer_HeartbeatHandle;
-const osTimerAttr_t Timer_Heartbeat_attributes = {
-  .name = "Timer_Heartbeat"
-};
-/* Definitions for AlarmSemaphore */
-osSemaphoreId_t AlarmSemaphoreHandle;
-const osSemaphoreAttr_t AlarmSemaphore_attributes = {
-  .name = "AlarmSemaphore"
-};
 /* USER CODE BEGIN PV */
-
+volatile uint16_t uart_rx_size = 0;
+// Mượn Handle từ app_tasks.c để dùng trong các hàm ngắt
+extern osSemaphoreId_t AlarmSemaphoreHandle;
+extern osThreadId_t UART_Parse_TaskHandle;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -108,11 +67,6 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_USART6_UART_Init(void);
 static void MX_TIM3_Init(void);
-void StartDefaultTask(void *argument);
-void StartTask02(void *argument);
-void StartTask03(void *argument);
-void StartTask04(void *argument);
-void Callback01(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -161,47 +115,15 @@ int main(void)
 
   /* Init scheduler */
   osKernelInitialize();
+  App_Init();
 
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
 
-  /* Create the semaphores(s) */
-  /* creation of AlarmSemaphore */
-  AlarmSemaphoreHandle = osSemaphoreNew(1, 1, &AlarmSemaphore_attributes);
-
-  /* USER CODE BEGIN RTOS_SEMAPHORES */
-  /* add semaphores, ... */
-  /* USER CODE END RTOS_SEMAPHORES */
-
-  /* Create the timer(s) */
-  /* creation of Timer_Heartbeat */
-  Timer_HeartbeatHandle = osTimerNew(Callback01, osTimerPeriodic, NULL, &Timer_Heartbeat_attributes);
-
-  /* USER CODE BEGIN RTOS_TIMERS */
-  osTimerStart(Timer_HeartbeatHandle, 1000U);
-  /* USER CODE END RTOS_TIMERS */
-
-  /* Create the queue(s) */
-  /* creation of ActuatorQueue */
-  ActuatorQueueHandle = osMessageQueueNew (10, sizeof(ControlCmd_t), &ActuatorQueue_attributes);
-
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
-
-  /* Create the thread(s) */
-  /* creation of Sensor_Task */
-  Sensor_TaskHandle = osThreadNew(StartDefaultTask, NULL, &Sensor_Task_attributes);
-
-  /* creation of Actuator_Task */
-  Actuator_TaskHandle = osThreadNew(StartTask02, NULL, &Actuator_Task_attributes);
-
-  /* creation of UART_Parse_Task */
-  UART_Parse_TaskHandle = osThreadNew(StartTask03, NULL, &UART_Parse_Task_attributes);
-
-  /* creation of Alarm_Task */
-  Alarm_TaskHandle = osThreadNew(StartTask04, NULL, &Alarm_Task_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -390,7 +312,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOA, MOTOR1_Pin | MOTOR2_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, RELAY2_Pin|RELAY1_Pin|LED_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, RELAY2_Pin|RELAY1_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(DATA_OUT_GPIO_Port, DATA_OUT_Pin, GPIO_PIN_SET);
@@ -402,8 +324,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : RELAY2_Pin RELAY1_Pin LED_Pin */
-  GPIO_InitStruct.Pin = RELAY2_Pin|RELAY1_Pin|LED_Pin;
+  /*Configure GPIO pins : RELAY2_Pin RELAY1_Pin*/
+  GPIO_InitStruct.Pin = RELAY2_Pin|RELAY1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -453,9 +375,9 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
     if (huart->Instance == USART6)
     {
         // Gói tin từ ESP32 đã đến trọn vẹn.
-        // Biến 'Size' cho bạn biết chính xác ESP32 đã gửi bao nhiêu byte.
-
-        // Bắn Cờ hiệu (Thread Flag 0x01) để đánh thức Task03 dậy xử lý Buffer
+    	// Lưu lại chính xác số byte phần cứng vừa hứng được
+    	        uart_rx_size = Size;
+		// Bắn Cờ hiệu (Thread Flag 0x01) để đánh thức Task03 dậy xử lý Buffer
         osThreadFlagsSet(UART_Parse_TaskHandle, 0x01);
     }
 }
@@ -465,314 +387,9 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
  * @param json_str Con trỏ trỏ tới buffer chứa chuỗi JSON
  * @return bool True nếu bóc tách thành công ít nhất 1 lệnh
  */
-bool Parse_And_Queue_JSON(const char* json_str) {
-    if (json_str == NULL) return false;
-
-    bool parsed_any = false;
-
-    // --- XỬ LÝ RELAY 1 ---
-    // 1. Tìm vị trí xuất hiện của Key "relay1"
-    const char *p1 = strstr(json_str, "\"relay1\"");
-    if (p1 != NULL) {
-        // 2. Tìm vị trí dấu hai chấm ':' ngay sau Key
-        p1 = strchr(p1, ':');
-        if (p1 != NULL) {
-            // 3. Ép kiểu phần tử ngay sau dấu ':' thành số nguyên
-            int state1 = atoi(p1 + 1);
-
-            // 4. Kiểm tra biên bảo mật (Sanity Check) và đẩy vào Queue
-            if (state1 == 0 || state1 == 1) {
-                ControlCmd_t cmd1;
-                cmd1.device_id = 1;
-                cmd1.state = (uint8_t)state1;
-                osMessageQueuePut(ActuatorQueueHandle, &cmd1, 0, 0); //
-                parsed_any = true;
-            }
-        }
-    }
-
-    // --- XỬ LÝ RELAY 2 ---
-    const char *p2 = strstr(json_str, "\"relay2\"");
-    if (p2 != NULL) {
-        p2 = strchr(p2, ':');
-        if (p2 != NULL) {
-            int state2 = atoi(p2 + 1);
-            if (state2 == 0 || state2 == 1) {
-                ControlCmd_t cmd2;
-                cmd2.device_id = 2;
-                cmd2.state = (uint8_t)state2;
-                osMessageQueuePut(ActuatorQueueHandle, &cmd2, 0, 0); //[cite: 3]
-                parsed_any = true;
-            }
-        }
-    }
-
-    // --- XỬ LÝ RELAY MOSFET 1 ---
-        const char *p3 = strstr(json_str, "\"mosfet1\"");
-        if (p3 != NULL) {
-            p3 = strchr(p3, ':');
-            if (p3 != NULL) {
-                int state3 = atoi(p3 + 1);
-                if (state3 == 0 || state3 == 1) {
-                    ControlCmd_t cmd3;
-                    cmd3.device_id = 3;
-                    cmd3.state = (uint8_t)state3;
-                    osMessageQueuePut(ActuatorQueueHandle, &cmd3, 0, 0); //[cite: 3]
-                    parsed_any = true;
-                }
-            }
-        }
-
-        // --- XỬ LÝ MOSFET 2 ---
-            const char *p4 = strstr(json_str, "\"mosfet2\"");
-            if (p4 != NULL) {
-                p4 = strchr(p4, ':');
-                if (p4 != NULL) {
-                    int state4 = atoi(p4 + 1);
-                    if (state4 == 0 || state4 == 1) {
-                        ControlCmd_t cmd4;
-                        cmd4.device_id = 4;
-                        cmd4.state = (uint8_t)state4;
-                        osMessageQueuePut(ActuatorQueueHandle, &cmd4, 0, 0); //[cite: 3]
-                        parsed_any = true;
-                    }
-                }
-            }
-
-    // --- XỬ LÝ LỆNH MỞ KHÓA BÁO ĐỘNG  ---
-        const char *p5 = strstr(json_str, "\"alarm_clear\"");
-        if (p5 != NULL) {
-            p5 = strchr(p5, ':');
-            if (p5 != NULL) {
-                int clear_cmd = atoi(p5 + 1);
-                if (clear_cmd == 0 || clear_cmd == 1) {
-                    // Bắn cờ hiệu (Flag 0x02) sang luồng Alarm_Task để phá vỡ vòng lặp
-                    osThreadFlagsSet(Alarm_TaskHandle, 0x02);
-                    parsed_any = true;
-                }
-            }
-        }
-
-	return parsed_any;
-}
+bool Parse_And_Queue_JSON(const char* json_str);
 
 /* USER CODE END 4 */
-
-/* USER CODE BEGIN Header_StartDefaultTask */
-/**
-  * @brief  Function implementing the App_Main_Task thread.
-  * @param  argument: Not used
-  * @retval None
-  */
-/* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void *argument)
-{
-  /* USER CODE BEGIN 5 */
-    DHT22_Data_t my_dht_data;
-    char tx_buffer[128]; // Bộ đệm tĩnh chứa chuỗi JSON đẩy lên ESP32
-
-    // Khởi tạo cảm biến
-    DHT22_Init();
-
-    /* Infinite loop */
-    for(;;)
-    {
-    	// 1. ĐỌC DỮ LIỆU TỪ DHT22
-    	    if (DHT22_Read_Data(&my_dht_data)) {
-
-    	        // 2. ÉP KIỂU SỐ THỰC THÀNH SỐ NGUYÊN (Bảo vệ Stack)
-    	        int temp_int = (int)my_dht_data.Temperature;
-    	        int temp_frac = (int)(my_dht_data.Temperature * 10) % 10;
-
-    	        int hum_int = (int)my_dht_data.Humidity;
-    	        int hum_frac = (int)(my_dht_data.Humidity * 10) % 10;
-
-    	        // 3. ĐÓNG GÓI JSON VỚI KEY CHUẨN BACKEND (Chỉ dùng %d)
-    	        snprintf(tx_buffer, sizeof(tx_buffer), "{\"temperature\": %d.%d, \"humidity\": %d.%d}\r\n",
-    	                 temp_int, temp_frac, hum_int, hum_frac);
-
-            // 4. GỬI DỮ LIỆU LÊN ESP32
-            // Tạm thời sử dụng cơ chế Polling (Blocking) với Timeout = 100ms
-            HAL_UART_Transmit(&huart6, (uint8_t*)tx_buffer, strlen(tx_buffer), 100);
-
-        } else {
-            // Xử lý khi lỗi đọc cảm biến (Bắn chuỗi cảnh báo lên Dashboard)
-            const char* error_msg = "{\"error\": \"DHT22_Disconnected\"}\r\n";
-            HAL_UART_Transmit(&huart6, (uint8_t*)error_msg, strlen(error_msg), 100);
-        }
-
-        // Chu kỳ lấy mẫu: 2 giây
-        osDelay(3000);
-    }
-  /* USER CODE END 5 */
-}
-
-/* USER CODE BEGIN Header_StartTask02 */
-/**
-* @brief Function implementing the Task_Sensor thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartTask02 */
-void StartTask02(void *argument)
-{
-  /* USER CODE BEGIN StartTask02 */
-	  // 1. Trạng thái an toàn ban đầu: Tắt toàn bộ tải
-	  HAL_GPIO_WritePin(GPIOB, RELAY1_Pin | RELAY2_Pin, GPIO_PIN_RESET); // Active Low
-
-	  ControlCmd_t rx_cmd; // Biến cục bộ để hứng dữ liệu từ Queue
-
-	  /* Infinite loop */
-	  for(;;)
-	  {
-	      // 2. NGỦ ĐÔNG chờ lệnh. Task bị block ở đây không tốn CPU
-	      if (osMessageQueueGet(ActuatorQueueHandle, &rx_cmd, NULL, osWaitForever) == osOK)
-	      {
-	          // 3. THỰC THI LỆNH (Đã lấy được bản tin ra khỏi Queue)
-	          switch (rx_cmd.device_id)
-	          {
-	              case 1: // Điều khiển Relay 1 (AC)
-	                  // Mạch NPN Active High: state=1 => Kéo HIGH để bật
-	                  if (rx_cmd.state == 1) HAL_GPIO_WritePin(GPIOB, RELAY1_Pin, GPIO_PIN_SET);
-	                  else HAL_GPIO_WritePin(GPIOB, RELAY1_Pin, GPIO_PIN_RESET);
-	                  break;
-
-	              case 2: // Điều khiển Relay 2 (AC)
-	                  if (rx_cmd.state == 1) HAL_GPIO_WritePin(GPIOB, RELAY2_Pin, GPIO_PIN_SET);
-	                  else HAL_GPIO_WritePin(GPIOB, RELAY2_Pin, GPIO_PIN_RESET);
-	                  break;
-
-	              case 3: // Điều khiển MOSFET 1
-						// LƯU Ý: Bạn cần thay MOSFET_GPIO_Port và MOSFET_Pin bằng Macro thực tế cấu hình trong CubeMX
-						if (rx_cmd.state == 1) HAL_GPIO_WritePin(GPIOA, MOTOR1_Pin, GPIO_PIN_RESET);
-						else HAL_GPIO_WritePin(GPIOA, MOTOR1_Pin, GPIO_PIN_SET);
-						break;
-
-	              case 4: // Điều khiển MOSFET 1
-						// LƯU Ý: Bạn cần thay MOSFET_GPIO_Port và MOSFET_Pin bằng Macro thực tế cấu hình trong CubeMX
-						if (rx_cmd.state == 1) HAL_GPIO_WritePin(GPIOA, MOTOR2_Pin, GPIO_PIN_RESET);
-						else HAL_GPIO_WritePin(GPIOA, MOTOR2_Pin, GPIO_PIN_SET);
-						break;
-
-	          }
-	      }
-	  }
-  /* USER CODE END StartTask02 */
-}
-
-/* USER CODE BEGIN Header_StartTask03 */
-/**
-* @brief Function implementing the Task_UART_Parse thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartTask03 */
-void StartTask03(void *argument)
-{
-  /* USER CODE BEGIN StartTask03 */
-    uint8_t rx_buffer[256];
-    uint8_t process_buffer[256]; // Thêm Local Buffer để xử lý an toàn
-
-    memset(rx_buffer, 0, sizeof(rx_buffer));
-
-    // Khởi động DMA lắng nghe ở chế độ IDLE
-    HAL_UARTEx_ReceiveToIdle_DMA(&huart6, rx_buffer, sizeof(rx_buffer));
-
-    for(;;)
-    {
-        // 1. Chờ cờ hiệu từ hàm ngắt (HAL_UARTEx_RxEventCallback)
-        osThreadFlagsWait(0x01, osFlagsWaitAny, osWaitForever);
-
-        // Tắt ngắt DMA tạm thời để copy data an toàn (Tránh đụng độ nếu data đến liên tục)
-        HAL_UART_DMAStop(&huart6);
-
-        // 2. Clone data sang Process Buffer & Dọn dẹp RX Buffer
-        memcpy(process_buffer, rx_buffer, sizeof(rx_buffer));
-        memset(rx_buffer, 0, sizeof(rx_buffer));
-
-        // 3. Khởi động lại luồng thu thập DMA ngay lập tức để không rớt gói tin tiếp theo
-        HAL_UARTEx_ReceiveToIdle_DMA(&huart6, rx_buffer, sizeof(rx_buffer));
-
-        // 4. Phân tích trên process_buffer (an toàn tuyệt đối)
-        Parse_And_Queue_JSON((char*)process_buffer);
-
-        // 5. Gửi Debug phản hồi (Sử dụng hàm Blocking để đảm bảo an toàn vùng nhớ)
-        HAL_UART_Transmit(&huart6, process_buffer, strlen((char*)process_buffer), 100);
-    }
-  /* USER CODE END StartTask03 */
-}
-
-/* USER CODE BEGIN Header_StartTask04 */
-/**
-* @brief Function implementing the Task_Alarm thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartTask04 */
-void StartTask04(void *argument)
-{
-    // Rút cạn token rác lúc khởi tạo
-    osSemaphoreAcquire(AlarmSemaphoreHandle, 0);
-
-    char uplink_msg[128]; // Bộ đệm chứa chuỗi JSON đẩy lên ESP32
-
-    for(;;)
-    {
-        // 1. NGỦ ĐÔNG VÔ TẬN: Chờ Ngắt EXTI từ MQ-2 (D_OUT_Pin)
-        osSemaphoreAcquire(AlarmSemaphoreHandle, osWaitForever);
-
-        // 2. PHÁT HIỆN KHÓI -> KHÓA CHÉO (INTERLOCK)
-        // Kích hoạt còi
-        HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
-
-        // Khóa khẩn cấp Relay và MOSFET để chống cháy nổ (Đảm bảo an toàn Logic Đảo nếu có)
-        HAL_GPIO_WritePin(GPIOB, RELAY1_Pin | RELAY2_Pin, GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(GPIOA, MOTOR1_Pin | MOTOR2_Pin, GPIO_PIN_SET); // Tùy logic phần cứng
-
-        // 3. ĐỒNG BỘ NGƯỢC LÊN ESP32 (BÁO CHÁY)
-        snprintf(uplink_msg, sizeof(uplink_msg), "{\"relay1\":0, \"relay2\":0, \"mosfet1\":0, \"mosfet2\":0, \"alarm_clear\":1}\r\n");
-        HAL_UART_Transmit(&huart6, (uint8_t*)uplink_msg, strlen(uplink_msg), 100);
-
-        // 4. VÒNG LẶP HÚ CÒI & CHỜ LỆNH GIẢI TRỪ
-        while(1) {
-            // Nhấp nháy còi
-            HAL_GPIO_TogglePin(BUZZER_GPIO_Port, BUZZER_Pin);
-
-            // Chờ cờ 0x02 (Lệnh alarm_clear từ UART_Parse_Task) trong 500ms tạo nhịp bíp
-            uint32_t flags = osThreadFlagsWait(0x02, osFlagsWaitAny, 500);
-
-            if (flags == 0x02) {
-				// 1. TẮT CÒI VÀ ĐỒNG BỘ GIAO DIỆN
-				HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
-				snprintf(uplink_msg, sizeof(uplink_msg), "{\"alarm_clear\":0}\r\n");
-				HAL_UART_Transmit(&huart6, (uint8_t*)uplink_msg, strlen(uplink_msg), 100);
-
-				// 2. VÉT CẠN SEMAPHORE (Semaphore Draining)
-				// Loại bỏ toàn bộ các Token rác do EXTI dội phím sinh ra
-				while (osSemaphoreAcquire(AlarmSemaphoreHandle, 0) == osOK) {
-					// Bỏ qua, chỉ rút token
-				}
-
-				// 3. CHỜ KHÓI TAN (Hardware Polling)
-				// Đảm bảo cảm biến MQ-2 (D_OUT_Pin) đã trở về mức HIGH (An toàn)
-				// Tránh hiện tượng vừa thoát ra đã bị ngắt EXTI đánh sập lại
-				while (HAL_GPIO_ReadPin(D_OUT_GPIO_Port, D_OUT_Pin) == GPIO_PIN_RESET) {
-					osDelay(500); // Polling mỗi 500ms
-				}
-
-				break; // Chỉ thoát vòng lặp khi môi trường đã thực sự an toàn
-			}
-        }
-    }
-}
-
-/* Callback01 function */
-void Callback01(void *argument)
-{
-  /* USER CODE BEGIN Callback01 */
-	HAL_GPIO_TogglePin(GPIOB, LED_Pin);
-  /* USER CODE END Callback01 */
-}
 
 /**
   * @brief  Period elapsed callback in non blocking mode
