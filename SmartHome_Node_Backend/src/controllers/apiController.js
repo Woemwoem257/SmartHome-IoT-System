@@ -69,5 +69,23 @@ const controlDevice = (req, res) => {
     }
 };
 
+// [POST] Xử lý nút Giải trừ báo động
+const clearAlarm = (req, res) => {
+    try {
+        publishControlCommand({ alarm_clear: 1 });
+        return res.status(202).json({
+            success: true,
+            status: 'pending',
+            message: 'Đã gửi yêu cầu giải trừ báo động xuống Gateway'
+        });
+    } catch (error) {
+        console.error('[API] Lỗi giải trừ báo động:', error);
+        return res.status(503).json({
+            success: false,
+            message: 'Không thể gửi lệnh đến gateway'
+        });
+    }
+};
+
 // ĐỪNG QUÊN XUẤT HÀM MỚI Ở ĐÂY
-module.exports = { getLatestSensorData, getSensorHistory, controlDevice };
+module.exports = { getLatestSensorData, getSensorHistory, controlDevice, clearAlarm };
