@@ -5,22 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SmartHome Dashboard</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+  
+  <!-- 1. NHÚNG THƯ VIỆN WEBSOCKET VÀ CHART.JS -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body class="bg-light">
   <!-- Navbar -->
   <nav class="navbar navbar-dark bg-dark mb-4 shadow">
     <div class="container">
-      <span class="navbar-brand mb-0 h1">Hệ thống Điều khiển ESP32</span>
+      <span class="navbar-brand mb-0 h1">Hệ thống Điều khiển ESP32 - Realtime Dashboard</span>
     </div>
   </nav>
 
   <div class="container">
-    <!-- Khối Hiển thị Cảm biến -->
+    <!-- Khối Hiển thị Số liệu Tức thời -->
     <div class="row mb-4">
       <div class="col-md-6 mb-3">
         <div class="card bg-primary text-white text-center shadow">
           <div class="card-body">
-            <h5>NHIỆT ĐỘ</h5>
+            <h5>NHIỆT ĐỘ HIỆN TẠI</h5>
             <h2 class="fw-bold"><span id="temperature">--</span> °C</h2>
           </div>
         </div>
@@ -28,32 +32,37 @@
       <div class="col-md-6 mb-3">
         <div class="card bg-info text-white text-center shadow">
           <div class="card-body">
-            <h5>ĐỘ ẨM</h5>
+            <h5>ĐỘ ẨM HIỆN TẠI</h5>
             <h2 class="fw-bold"><span id="humidity">--</span> %</h2>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Khối Điều khiển Thiết bị -->
-    <div class="row">
-      <!-- Cột Mosfet -->
-      <div class="col-md-6 mb-4">
+    <!-- Khối Hiển thị Biểu đồ Thời gian thực -->
+    <div class="row mb-4">
+      <div class="col-12">
         <div class="card shadow">
-          <div class="card-header bg-dark text-white fw-bold">Quản lý Mosfet (0 - 3)</div>
-          <ul class="list-group list-group-flush" id="mosfet-list">
-            <!-- Render bằng JavaScript -->
-          </ul>
+          <div class="card-header bg-dark text-white fw-bold">Biểu đồ Viễn trắc (Real-time Telemetry)</div>
+          <div class="card-body">
+            <canvas id="telemetryChart" height="100"></canvas>
+          </div>
         </div>
       </div>
+    </div>
 
-      <!-- Cột Relay -->
+    <!-- Khối Điều khiển Thiết bị (Giữ nguyên cấu trúc HTML) -->
+    <div class="row">
       <div class="col-md-6 mb-4">
         <div class="card shadow">
-          <div class="card-header bg-dark text-white fw-bold">Quản lý Relay (0 - 3)</div>
-          <ul class="list-group list-group-flush" id="relay-list">
-            <!-- Render bằng JavaScript -->
-          </ul>
+          <div class="card-header bg-dark text-white fw-bold">Quản lý Mosfet (Quạt / DC)</div>
+          <ul class="list-group list-group-flush" id="mosfet-list"></ul>
+        </div>
+      </div>
+      <div class="col-md-6 mb-4">
+        <div class="card shadow">
+          <div class="card-header bg-dark text-white fw-bold">Quản lý Relay (Đèn / AC)</div>
+          <ul class="list-group list-group-flush" id="relay-list"></ul>
         </div>
       </div>
     </div>
@@ -61,16 +70,109 @@
 
   <!-- Lớp Logic Tương tác (Client-side JavaScript) -->
   <script>
-    // 1. Khởi tạo danh sách thiết bị
-    const mosfets = ['mosfet1', 'mosfet2', 'mosfet3', 'mosfet4'];
-    const relays = ['relay1', 'relay2', 'relay3', 'relay4'];
-    let deviceStates = {}; // Lưu trữ trạng thái on/off nội bộ
+    /* =========================================================================
+     * A1. KHỞI TẠO BIỂU ĐỒ CHART.JS
+     * ========================================================================= */
+    const ctx = document.getElementById('telemetryChart').getContext('2d');
+    const telemetryChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [], // Trục X: Thời gian
+            datasets: [
+                {
+                    label: 'Nhiệt độ (°C)',
+                    data: [], // Trục Y1
+                    borderColor: 'rgb(255, 99, 132)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                    tension: 0.4, // Làm mượt đường cong
+                    fill: true
+                },
+                {
+                    label: 'Độ ẩm (%)',
+                    data: [], // Trục Y2
+                    borderColor: 'rgb(54, 162, 235)',
+                    backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                    tension: 0.4,
+                    fill: true
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            animation: false, // TẮT ANIMATION để tối ưu render Real-time
+            scales: {
+                y: { beginAtZero: false } // Không bắt đầu từ 0 để đồ thị dao động rõ hơn
+            }
+        }
+    });
 
-    // Hàm tạo giao diện danh sách nút bấm
+    /* =========================================================================
+     * A2. TẢI LỊCH SỬ DỮ LIỆU TỪ MONGODB KHI VỪA MỞ TRANG
+     * ========================================================================= */
+    async function loadChartHistory() {
+        try {
+            const response = await fetch('/api/v1/sensor/history');
+            const result = await response.json();
+            
+            if (result.success && result.data.length > 0) {
+                result.data.forEach(point => {
+                    // Chuyển đổi timestamp ISO thành giờ địa phương
+                    const timeString = new Date(point.timestamp).toLocaleTimeString('vi-VN');
+                    
+                    telemetryChart.data.labels.push(timeString);
+                    telemetryChart.data.datasets[0].data.push(point.temperature);
+                    telemetryChart.data.datasets[1].data.push(point.humidity);
+                });
+                // Ép Chart.js vẽ lại toàn bộ 30 điểm
+                telemetryChart.update();
+            }
+        } catch (error) {
+            console.error('[Giao diện] Lỗi tải lịch sử biểu đồ:', error);
+        }
+    }
+
+    // Thực thi hàm ngay lập tức
+    loadChartHistory();
+
+    /* =========================================================================
+     * B. KẾT NỐI WEBSOCKET & XỬ LÝ SỰ KIỆN TỪ BACKEND
+     * ========================================================================= */
+    const socket = io(); // Tự động dò tìm và kết nối đến cùng một Domain/Port
+
+    // Lắng nghe sự kiện viễn trắc từ MQTT dội xuống
+    socket.on('device:sensor_update', (data) => {
+        // 1. Cập nhật thẻ hiển thị số
+        document.getElementById('temperature').innerText = data.temperature;
+        document.getElementById('humidity').innerText = data.humidity;
+
+        // 2. Cập nhật Biểu đồ
+        const timeNow = new Date().toLocaleTimeString('vi-VN');
+        
+        telemetryChart.data.labels.push(timeNow);
+        telemetryChart.data.datasets[0].data.push(data.temperature);
+        telemetryChart.data.datasets[1].data.push(data.humidity);
+
+        // Kỹ thuật Cửa sổ trượt (Sliding Window): Giữ tối đa 30 điểm dữ liệu
+        if (telemetryChart.data.labels.length > 30) {
+            telemetryChart.data.labels.shift();
+            telemetryChart.data.datasets[0].data.shift();
+            telemetryChart.data.datasets[1].data.shift();
+        }
+        
+        telemetryChart.update();
+    });
+
+    /* =========================================================================
+     * C. QUẢN LÝ ĐIỀU KHIỂN (GỌI API RESTful NHƯ CŨ)
+     * ========================================================================= */
+    const mosfets = ['mosfet1', 'mosfet2'];
+    const relays = ['relay1', 'relay2'];
+    let deviceStates = {}; 
+
     function renderDeviceList(deviceArray, containerId) {
       const container = document.getElementById(containerId);
       deviceArray.forEach(deviceName => {
-        deviceStates[deviceName] = 0; // Mặc định là OFF (0)
+        deviceStates[deviceName] = 0; 
         
         const li = document.createElement('li');
         li.className = 'list-group-item d-flex justify-content-between align-items-center py-3';
@@ -88,24 +190,7 @@
     renderDeviceList(mosfets, 'mosfet-list');
     renderDeviceList(relays, 'relay-list');
 
-    // 2. Luồng Lắng nghe Dữ liệu (GET API)
-    async function fetchLatestSensorData() {
-      try {
-        const response = await fetch('/api/v1/sensor/latest');
-        const result = await response.json();
-        
-        if (result.success) {
-          document.getElementById('temperature').innerText = result.data.temperature;
-          document.getElementById('humidity').innerText = result.data.humidity;
-        }
-      } catch (error) {
-        console.error('[Giao diện] Lỗi kết nối Cảm biến:', error);
-      }
-    }
-
-    // 3. Luồng Gửi Lệnh Điều khiển (POST API)
     async function toggleDevice(deviceName) {
-      // Đảo ngược trạng thái hiện tại (0 -> 1, 1 -> 0)
       const newStatus = deviceStates[deviceName] === 1 ? 0 : 1;
       
       try {
@@ -117,7 +202,6 @@
         
         const result = await response.json();
         if (result.success) {
-          // Nếu Backend báo thành công -> Cập nhật UI
           deviceStates[deviceName] = newStatus;
           updateDeviceUI(deviceName, newStatus);
         } else {
@@ -128,7 +212,6 @@
       }
     }
 
-    // Hàm cập nhật màu sắc nút bấm
     function updateDeviceUI(deviceName, status) {
       const badge = document.getElementById(`badge-${deviceName}`);
       const btn = document.getElementById(`btn-${deviceName}`);
@@ -146,9 +229,16 @@
       }
     }
 
-    // Khởi chạy Polling Cảm biến mỗi 3 giây
-    fetchLatestSensorData();
-    setInterval(fetchLatestSensorData, 3000);
+    // Lắng nghe sự kiện đồng bộ trạng thái thực tế từ thiết bị (Nâng cao)
+    socket.on('device:state_sync', (data) => {
+        // data payload từ MQTT: {"relay1": 1}
+        const deviceName = Object.keys(data)[0];
+        const status = data[deviceName];
+        if (deviceStates.hasOwnProperty(deviceName)) {
+            deviceStates[deviceName] = status;
+            updateDeviceUI(deviceName, status);
+        }
+    });
   </script>
 </body>
 </html>

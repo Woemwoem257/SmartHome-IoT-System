@@ -25,6 +25,26 @@ const getLatestSensorData = async (req, res) => {
     }
 };
 
+// ============================================================================
+// [GET] LẤY LỊCH SỬ DỮ LIỆU ĐỂ VẼ BIỂU ĐỒ (INITIAL LOAD)
+// ============================================================================
+const getSensorHistory = async (req, res) => {
+    try {
+        const historyData = await Telemetry.find()
+            .sort({ timestamp: -1 })
+            .limit(30)
+            .select('temperature humidity timestamp -_id'); 
+
+        // Đảo ngược mảng để Chart.js vẽ đúng từ trái (cũ) sang phải (mới)
+        const chartReadyData = historyData.reverse();
+
+        res.status(200).json({ success: true, data: chartReadyData });
+    } catch (error) {
+        console.error('[API] ❌ Lỗi truy vấn lịch sử:', error.message);
+        res.status(500).json({ success: false, message: 'Lỗi truy xuất cơ sở dữ liệu' });
+    }
+};
+
 // [POST] Điều khiển thiết bị (Bật/Tắt Relay)
 const controlDevice = (req, res) => {
     try {
@@ -49,4 +69,5 @@ const controlDevice = (req, res) => {
     }
 };
 
-module.exports = { getLatestSensorData, controlDevice };
+// ĐỪNG QUÊN XUẤT HÀM MỚI Ở ĐÂY
+module.exports = { getLatestSensorData, getSensorHistory, controlDevice };
