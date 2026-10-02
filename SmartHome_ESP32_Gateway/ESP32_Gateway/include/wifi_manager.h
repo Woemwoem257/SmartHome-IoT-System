@@ -15,4 +15,5 @@ private:
 
     public:
         static void init();
+        static void sync_time();
 };

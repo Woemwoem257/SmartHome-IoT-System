@@ -19,3 +19,6 @@ typedef struct {
 
 // Khai báo Queue toàn cục
 extern QueueHandle_t actuator_queue;
+
+// Khai báo hàm tác vụ gửi UART
+void actuator_tx_task(void *arg);

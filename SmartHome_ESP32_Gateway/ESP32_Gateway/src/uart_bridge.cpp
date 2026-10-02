@@ -16,6 +16,15 @@
 #define TXD_PIN            17
 #define RXD_PIN            16
 
+const char* device_keys[] = {
+    "unknown",
+    "relay1",
+    "relay2",
+    "mosfet1",
+    "mosfet2",
+    "alarm_clear"
+};
+
 const char* UartBridge::TAG = "UART_BRIDGE";
 const int UartBridge::RX_BUF_SIZE = 1024;
 static QueueHandle_t uart_queue;
@@ -144,4 +153,29 @@ void UartBridge::rx_task(void* arg) {
 void UartBridge::send_command(const std::string& cmd) {
     uart_write_bytes(UART_PORT_NUM, cmd.c_str(), cmd.length());
     ESP_LOGI(TAG, "Gui xuong STM32: %s", cmd.c_str());
+}
+
+void actuator_tx_task(void *arg) {
+    ControlMsg_t msg;
+    char cmd_buffer[64];
+
+    while (1) {
+        // Tác vụ này sẽ Block (ngủ) cho đến khi có dữ liệu trong hàng đợi
+        if (xQueueReceive(actuator_queue, &msg, portMAX_DELAY) == pdTRUE) {
+            
+            // Lấy tên key JSON tương ứng với ID thiết bị
+            if(msg.device_id >= DEV_RELAY_1 && msg.device_id <= DEV_ALARM_CLEAR) {
+                const char* key = device_keys[msg.device_id];
+                
+                // Đóng gói JSON Atomic
+                snprintf(cmd_buffer, sizeof(cmd_buffer), "{\"%s\":%d}\r\n", key, msg.state);
+                
+                // Gửi xuống STM32
+                UartBridge::send_command(cmd_buffer);
+                ESP_LOGI("UART_TX", "Dong bo tu AWS -> STM32 [%s]: %d", key, msg.state);
+            } else {
+                ESP_LOGE("UART_TX", "Device ID khong hop le: %d", msg.device_id);
+            }
+        }
+    }
 }

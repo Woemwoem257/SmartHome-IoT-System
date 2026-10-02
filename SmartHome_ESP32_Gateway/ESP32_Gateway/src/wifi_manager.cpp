@@ -2,6 +2,8 @@
 #include <string.h>       // Thư viện cần thiết cho lệnh strcpy
 #include "esp_wifi.h"
 #include "secrets.h"
+#include <esp_sntp.h>
+#include <time.h>
 
 #define MAXIMUM_RETRY 5
 
@@ -60,9 +62,40 @@ void WiFiManager::init() {
     ESP_ERROR_CHECK(esp_wifi_start());
     
     // Ép Anten Wi-Fi vào chế độ tiết kiệm điện năng
-    // ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
     // Ép công suất phát xuống khoảng 10dBm (tham số truyền vào là 40, vì 40 * 0.25 = 10dBm)
     // Giảm triệt để đỉnh dòng 500mA xuống còn khoảng 250mA
-    // ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(40));
+    ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(40));
     
+}
+
+void WiFiManager::sync_time() {
+    ESP_LOGI(TAG, "Dang khoi tao dong bo thoi gian SNTP...");
+    sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    sntp_setservername(0, "pool.ntp.org");
+    sntp_setservername(1, "time.nist.gov");
+    sntp_init();
+
+    time_t now = 0;
+    struct tm timeinfo = {};
+    int retry = 0;
+    const int retry_count = 15; // Chờ tối đa 30 giây
+
+    // Vòng lặp chặn (Blocking) cho đến khi lấy được giờ chuẩn (> năm 2020)
+    while (sntp_get_sync_status() == SNTP_SYNC_STATUS_RESET && ++retry < retry_count) {
+        ESP_LOGI(TAG, "Cho dong bo thoi gian tu Internet... (%d/%d)", retry, retry_count);
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
+    }
+
+    time(&now);
+    localtime_r(&now, &timeinfo);
+    
+    // Kiểm tra xem năm hiện tại đã lớn hơn 2020 chưa (1900 + 120)
+    if (timeinfo.tm_year < 120) {
+        ESP_LOGE(TAG, "Dong bo thoi gian THAT BAI! AWS mTLS se tu choi ket noi.");
+    } else {
+        char strftime_buf[64];
+        strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
+        ESP_LOGI(TAG, "Thoi gian hien tai (UTC): %s", strftime_buf);
+    }
 }

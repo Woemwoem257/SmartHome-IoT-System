@@ -39,23 +39,20 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 DeserializationError error = deserializeJson(doc, event->data, event->data_len);
 
                 if (!error) {
-                    // MẢNG ÁNH XẠ: Cấu hình Tên Key (JSON) và DeviceID tương ứng
                     const char* keys[] = {"relay1", "relay2", "mosfet1", "mosfet2", "alarm_clear"};
                     DeviceID_t ids[] = {DEV_RELAY_1, DEV_RELAY_2, DEV_MOSFET_1, DEV_MOSFET_2, DEV_ALARM_CLEAR};
                     int num_devices = sizeof(keys) / sizeof(keys[0]);
 
-                    // QUÉT TOÀN BỘ GÓI TIN ĐỂ BÓC TÁCH TỪNG LỆNH
                     for (int i = 0; i < num_devices; i++) {
                         if (doc.containsKey(keys[i])) {
-                            int state = doc[keys[i]];
+                            ControlMsg_t msg;
+                            msg.device_id = ids[i];
+                            msg.state = doc[keys[i]];
                             
-                            // 2. Chuẩn hóa chuỗi nguyên tử (Atomic JSON) + CRLF
-                            char cmd_buffer[64];
-                            snprintf(cmd_buffer, sizeof(cmd_buffer), "{\"%s\":%d}\r\n", keys[i], state);
-                            
-                            // 3. Bắn xuống STM32
-                            UartBridge::send_command(cmd_buffer);
-                            ESP_LOGI(TAG, "Dong bo tu AWS -> STM32 [%s]: %d", keys[i], state);
+                            // ĐẨY VÀO HÀNG ĐỢI THAY VÌ GỌI UART TRỰC TIẾP
+                            if (xQueueSend(actuator_queue, &msg, 0) != pdTRUE) {
+                                ESP_LOGE(TAG, "Hang doi Actuator da day! Bo qua lenh cho %s", keys[i]);
+                            }
                         }
                     }
                 } else {
