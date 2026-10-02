@@ -9,7 +9,7 @@
 
 // 1. Kéo các thư viện mới vào
 #include <ArduinoJson.h>
-#include "hmi_manager.h" 
+#include "device_control.h"
 
 #define UART_PORT_NUM      UART_NUM_1
 #define UART_BAUD_RATE     115200
@@ -35,7 +35,6 @@ static void process_json_packet(const char* json_str) {
     if (doc.containsKey("temperature") && doc.containsKey("humidity")) {
         float temp = doc["temperature"];
         float hum = doc["humidity"];
-        HmiManager::update_sensor_data(temp, hum);
         AwsMqtt::publish("gateway/sensor/data", json_str);
         ESP_LOGI("ROUTER", "Da cap nhat UI & Cloud -> Temp: %.1fC, Hum: %.1f%%", temp, hum);
     } 
@@ -51,8 +50,6 @@ for (int i = 0; i < num_devices; i++) {
     if (doc.containsKey(keys[i])) {
         int state = doc[keys[i]];
         
-        // Ép giao diện UI cập nhật
-        HmiManager::update_actuator_state(ids[i], state == 1);
         has_ack = true; // Đánh dấu có lệnh hợp lệ
         
         ESP_LOGI("ROUTER", "Nhan ACK tu STM32 [%s]: %d", keys[i], state);

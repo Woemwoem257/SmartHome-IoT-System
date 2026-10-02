@@ -1,5 +1,4 @@
 #pragma once
-#include <lvgl.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 
@@ -18,14 +17,5 @@ typedef struct {
     uint8_t state; // 0: Tắt, 1: Bật
 } ControlMsg_t;
 
-
-// Khai báo Queue toàn cục để các file khác có thể truy cập
+// Khai báo Queue toàn cục
 extern QueueHandle_t actuator_queue;
-
-class HmiManager {
-public:
-    static void build_ui();
-    static void update_sensor_data(float temp, float hum);
-    static void update_actuator_state(DeviceID_t id, bool is_on);
-    static void update_network_status(bool is_connected);
-};

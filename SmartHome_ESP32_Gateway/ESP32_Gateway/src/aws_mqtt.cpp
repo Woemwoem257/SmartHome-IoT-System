@@ -6,9 +6,7 @@
 #include "aws_certs.h"
 #include "uart_bridge.h"
 #include <ArduinoJson.h>
-#include "hmi_manager.h"
-#include "app_tasks.h"
-
+#include "device_control.h"
 
 static const char *TAG = "AWS_MQTT";
 
@@ -20,21 +18,15 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     
     switch ((esp_mqtt_event_id_t)event_id) {
         case MQTT_EVENT_CONNECTED:
-        // 1. ĐÁNH THỨC LUỒNG ĐỒ HỌA KHI KẾT NỐI THÀNH CÔNG
-            App_ResumeHMITask();
 
             ESP_LOGI(TAG, "Ket noi thanh cong den AWS IoT Core");
-            HmiManager::update_network_status(true);
             // Sau khi kết nối, tiến hành Subscribe các topic điều khiển
             esp_mqtt_client_subscribe(s_client, "gateway/control/actuator", 1);
             break;
             
         case MQTT_EVENT_DISCONNECTED:
-        // CŨNG PHẢI ĐÁNH THỨC NẾU RỚT MẠNG ĐỂ MÀN HÌNH KHÔNG BỊ ĐƠ MÃI MÃI
-            App_ResumeHMITask();
 
             ESP_LOGE(TAG, "Mat ket noi MQTT");
-            HmiManager::update_network_status(false);
             break;
             
         case MQTT_EVENT_DATA: {
@@ -57,9 +49,6 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                         if (doc.containsKey(keys[i])) {
                             int state = doc[keys[i]];
                             
-                            // 1. Cập nhật giao diện HMI (Đồng bộ UI)
-                            HmiManager::update_actuator_state(ids[i], state == 1);
-                            
                             // 2. Chuẩn hóa chuỗi nguyên tử (Atomic JSON) + CRLF
                             char cmd_buffer[64];
                             snprintf(cmd_buffer, sizeof(cmd_buffer), "{\"%s\":%d}\r\n", keys[i], state);
@@ -78,7 +67,6 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             
         case MQTT_EVENT_ERROR:
         /// ĐÁNH THỨC GIAO DIỆN NẾU CÓ LỖI TLS/TCP ĐỂ TRÁNH TREO MÀN HÌNH MÃI MÃI
-            App_ResumeHMITask();
             ESP_LOGW(TAG, "Da danh thuc HMI Task do MQTT loi.");
 
             
@@ -112,7 +100,6 @@ void AwsMqtt::init() {
     esp_mqtt_client_register_event(s_client, MQTT_EVENT_ANY, mqtt_event_handler, NULL);
     
     // 2. ĐÓNG BĂNG GIAO DIỆN NGAY TRƯỚC KHI KÍCH HOẠT KẾT NỐI mTLS
-    App_SuspendHMITask();
     ESP_LOGW(TAG, "Dong bang HMI de tap trung dien nang cho AWS mTLS...");
 
 
